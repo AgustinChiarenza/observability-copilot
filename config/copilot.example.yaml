@@ -1,0 +1,90 @@
+# Copilot — configuración de ejemplo.
+#
+# Este archivo está pensado para vivir en el repo de infraestructura del cliente,
+# revisado por PR. Por eso no lleva un solo secreto: cualquier valor se puede
+# escribir como ${VAR} o ${VAR:-default} y se resuelve contra el entorno al
+# arrancar. Un ${VAR} sin valor y sin default corta el arranque con el nombre del
+# campo — mejor eso que un 401 raro tres horas después.
+
+server:
+  host: 0.0.0.0
+  port: 8080
+  # Token compartido para /v1/*. Las rutas de salud quedan afuera a propósito:
+  # si el kubelet tuviera que autenticarse para preguntar si el pod vive, un
+  # token mal puesto se vería como un CrashLoop sin explicación.
+  api_token: ${COPILOT_API_TOKEN}
+
+# --- Métricas: el único puerto obligatorio ----------------------------------
+# El mismo adapter sirve para Prometheus, Thanos Query, Mimir, VictoriaMetrics,
+# Grafana Cloud y AMP: todos hablan la HTTP API v1.
+metrics:
+  adapter: prometheus
+  url: ${PROMETHEUS_URL:-http://prometheus:9090}
+  # auth:
+  #   type: bearer          # none | bearer | basic
+  #   token: ${PROM_TOKEN}
+  # headers:                # para lo que no entra en los tres de arriba
+  #   X-Scope-OrgID: tenant-a     # Mimir/Cortex multi-tenant
+  # verify_tls: true
+
+# --- Presupuesto de consulta ------------------------------------------------
+# Esto no es una preferencia: es lo único que separa "el agente consulta las
+# métricas" de "el agente le tira abajo el Prometheus de producción". El step de
+# un range lo calcula el adapter respetando max_points; lo que pase max_series
+# se descarta y el resultado sale marcado como parcial.
+budget:
+  max_series: 500
+  max_points: 11000
+  max_range: 31d
+  timeout: 30s
+
+# --- Costos: opcional, y se lee de donde ya esté ----------------------------
+# El adapter por defecto NO va a una API de facturación: corre PromQL contra la
+# misma TSDB de arriba. Si el cliente ya exporta su gasto (kubecost, opencost, un
+# exporter de billing, un recording rule), el dato ya está en casa — responde en
+# milisegundos, no pide credenciales nuevas y no tiene rate limit.
+# Las expresiones las escribe el cliente, así que sirve con cualquier nube.
+cost:
+  adapter: promql
+  daily: 'sum(increase(cloud_cost_usd_total[1d]))'
+  by_service: 'sum by (service) (increase(cloud_cost_usd_total[1d]))'
+  by_resource: 'sum by (resource_id) (increase(cloud_cost_usd_total[1d]))'
+  currency: USD
+  # Con cuánto atraso llega el dato. Sirve para no gritar por el día que todavía
+  # se está llenando, que es la falsa alarma más común de FinOps.
+  lag_days: 0
+
+# --- Modelo: por defecto, el del cliente ------------------------------------
+# Apuntalo a lo que ya tenga puesto: vLLM, Ollama, TGI, LiteLLM, MaaS, Azure
+# OpenAI o su gateway. Que los datos no salgan de su red es lo que hace que esto
+# se pueda instalar sin un proceso de aprobación de tres meses.
+model:
+  adapter: openai_compat
+  base_url: ${MODEL_BASE_URL}
+  api_key: ${MODEL_API_KEY:-}
+  model: ${MODEL_NAME:-qwen2.5-32b-instruct}
+  timeout_s: 120
+  # require_https: true   # prendelo en producción
+
+# --- Notificaciones ---------------------------------------------------------
+# En F0 hay webhook y log. Slack con bloques, Teams, mail y SMN/SMS son de F3.
+# El dedup, las quiet hours y el tope diario NO viven en el canal: van una capa
+# arriba, iguales para todos, porque lo que te desinstala no es un bug del
+# adapter de Slack, es mandar 200 SMS una madrugada.
+notify:
+  - name: ops
+    adapter: log
+  # - name: slack
+  #   adapter: webhook
+  #   url: ${SLACK_WEBHOOK_URL}
+  #   template: slack
+
+# --- Agente -----------------------------------------------------------------
+agent:
+  max_steps: 12
+  max_seconds: 180s
+  temperature: 0.2
+  # system_prompt: |
+  #   Sobreescribe el de fábrica. Sólo si sabés lo que estás haciendo: el default
+  #   insiste en descubrir el esquema antes de escribir queries, que es lo que
+  #   evita que el modelo invente nombres de métricas.

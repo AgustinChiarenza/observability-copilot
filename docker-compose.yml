@@ -1,0 +1,54 @@
+# Compose de desarrollo: el copiloto más un Prometheus de juguete, para poder
+# verificar el criterio de salida de F0 sin depender del stack de nadie.
+#
+# En lo del cliente NO se usa esto: ahí el copiloto es un contenedor más al lado
+# del Prometheus que ya tienen, y `metrics.url` apunta al de ellos.
+
+services:
+  copilot:
+    build: .
+    depends_on:
+      - prometheus
+    environment:
+      COPILOT_CONFIG: /etc/copilot/copilot.yaml
+      COPILOT_API_TOKEN: ${COPILOT_API_TOKEN:-dev-token-no-usar-en-produccion}
+      PROMETHEUS_URL: http://prometheus:9090
+      # Un placeholder para que el stack de desarrollo levante sin modelo: así
+      # se puede verificar todo lo demás (métricas, tools, auth, /metrics) antes
+      # de tener un endpoint. No lo oculta — /readyz va a reportar el modelo como
+      # inalcanzable, que es la verdad. Para el turno completo, exportá el tuyo.
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-http://sin-modelo-configurado.invalid/v1}
+      MODEL_API_KEY: ${MODEL_API_KEY:-}
+      MODEL_NAME: ${MODEL_NAME:-sin-modelo}
+      COPILOT_LOG_FORMAT: ${COPILOT_LOG_FORMAT:-text}
+      COPILOT_LOG_LEVEL: ${COPILOT_LOG_LEVEL:-INFO}
+    volumes:
+      - ./config/copilot.example.yaml:/etc/copilot/copilot.yaml:ro
+    ports:
+      # Configurables porque en una máquina de desarrollo casi siempre hay otro
+      # stack con Prometheus en 9090. Adentro de la red del compose los puertos
+      # no cambian nunca.
+      - "${COPILOT_HOST_PORT:-8080}:8080"
+    restart: unless-stopped
+    # Read-only es también una afirmación sobre el producto: no escribe nada en
+    # disco, así que el filesystem puede montarse de sólo lectura y eso queda
+    # demostrado en cada arranque, no prometido en un PDF.
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=3d
+      - --web.enable-lifecycle
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "${PROM_HOST_PORT:-9090}:9090"
+    restart: unless-stopped

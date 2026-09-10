@@ -1,0 +1,15 @@
+target-version = "py311"
+line-length = 100
+
+[lint]
+select = ["F", "E4", "E7", "E9", "B", "I", "UP", "SIM", "PERF", "DTZ", "RUF", "S"]
+ignore = [
+    "RUF001",  # los comentarios están en español: acentos y comillas tipográficas
+    "RUF002",
+    "RUF003",
+    "S101",    # assert: los tests son assert
+    "B008",    # Depends() en defaults es el idioma de FastAPI
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["S105", "S106"]  # tokens de juguete en fixtures

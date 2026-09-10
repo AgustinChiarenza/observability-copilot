@@ -1,0 +1,25 @@
+# Prometheus de juguete: existe para que el criterio de salida de F0 se pueda
+# verificar sin el stack de nadie. Se scrapea a sí mismo y al copiloto, así que
+# hay targets reales que contar y métricas reales que consultar.
+global:
+  # 5s y no 15s: es un fixture de desarrollo y lo que se gana es que la
+  # verificación de F0 tarde segundos en vez de medio minuto esperando el primer
+  # scrape. En lo del cliente este archivo no se usa.
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: copilot
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["copilot:8080"]
+
+  # Un target que no existe, a propósito: sin algo caído, "cuántos targets están
+  # up" se contesta con un número y no se ve si el agente sabe mirar el detalle.
+  - job_name: caido_a_proposito
+    static_configs:
+      - targets: ["no-existe.invalid:9100"]
