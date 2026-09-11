@@ -29,10 +29,12 @@ from typing import Any
 import httpx
 
 from ..ports.metrics import (
+    Alert,
     Budget,
     Instant,
     MetricsError,
     Range,
+    Rule,
     Sample,
     Series,
     Target,
@@ -60,6 +62,22 @@ def _f(raw: Any) -> float:
 
 def _ts(raw: Any) -> datetime:
     return datetime.fromtimestamp(float(raw), tz=UTC)
+
+
+def _rfc3339(raw: Any) -> datetime | None:
+    """`activeAt` viene como RFC 3339 con nanosegundos ("...T10:00:00.123456789Z").
+    `fromisoformat` acepta hasta seis decimales, así que se recorta. El cero de
+    Go ("0001-01-01T00:00:00Z") significa "nunca" y vuelve como None."""
+    if not raw or str(raw).startswith("0001-01-01"):
+        return None
+    texto = str(raw).replace("Z", "+00:00")
+    m = re.match(r"^(.*\.\d{1,6})\d*([+-].*)$", texto)
+    if m:
+        texto = m.group(1) + m.group(2)
+    try:
+        return datetime.fromisoformat(texto)
+    except ValueError:
+        return None
 
 
 @register("metrics", "prometheus")
@@ -252,6 +270,47 @@ class PrometheusMetrics:
                 last_error=str(t.get("lastError") or ""),
                 labels=labels,
             ))
+        return salida
+
+    async def alerts(self) -> list[Alert]:
+        data = await self._get("/api/v1/alerts", {})
+        crudas = (data or {}).get("alerts") or []
+        salida: list[Alert] = []
+        for a in crudas[: self.budget.max_series]:
+            labels = dict(a.get("labels") or {})
+            salida.append(Alert(
+                name=labels.get("alertname", ""),
+                state=str(a.get("state") or "firing").lower(),
+                labels=labels,
+                annotations=dict(a.get("annotations") or {}),
+                active_at=_rfc3339(a.get("activeAt")),
+                value=str(a.get("value") or ""),
+            ))
+        return salida
+
+    async def rules(self) -> list[Rule]:
+        # `type=alert` deja afuera las recording rules. Un backend viejo que no
+        # conozca el parámetro lo ignora y se filtra igual acá abajo.
+        data = await self._get("/api/v1/rules", {"type": "alert"})
+        salida: list[Rule] = []
+        for grupo in (data or {}).get("groups") or []:
+            for r in grupo.get("rules") or []:
+                if r.get("type") != "alerting":
+                    continue
+                salida.append(Rule(
+                    name=str(r.get("name") or ""),
+                    expression=str(r.get("query") or ""),
+                    group=str(grupo.get("name") or ""),
+                    state=str(r.get("state") or "inactive").lower(),
+                    duration_s=float(r.get("duration") or 0),
+                    labels=dict(r.get("labels") or {}),
+                    annotations=dict(r.get("annotations") or {}),
+                    health=str(r.get("health") or "unknown"),
+                    last_error=str(r.get("lastError") or ""),
+                    active=len(r.get("alerts") or []),
+                ))
+                if len(salida) >= self.budget.max_series:
+                    return salida
         return salida
 
     async def check(self) -> None:

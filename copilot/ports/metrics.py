@@ -95,6 +95,46 @@ class Range:
 
 
 @dataclass(frozen=True)
+class Alert:
+    """Una alerta como la ve el evaluador de reglas (Prometheus, vmalert,
+    Thanos/Mimir Ruler): el labelset, `state` firing o pending y desde cuándo.
+
+    Es lo que dispara el backend, **antes** de Alertmanager: acá no se ven
+    silences ni inhibición. Para "qué está sonando de verdad" hay que mirar el
+    Alertmanager (F2); para "qué está evaluando en rojo" alcanza con esto.
+    """
+
+    name: str
+    state: str                # "firing" | "pending"
+    labels: dict[str, str] = field(default_factory=dict)
+    annotations: dict[str, str] = field(default_factory=dict)
+    active_at: datetime | None = None
+    value: str = ""
+
+    @property
+    def severity(self) -> str:
+        return self.labels.get("severity", "")
+
+
+@dataclass(frozen=True)
+class Rule:
+    """Una regla de alerta, con su expresión. La expresión vale oro: es la
+    query que hay que correr en rango para explicar por qué disparó, sin tener
+    que adivinarla."""
+
+    name: str
+    expression: str
+    group: str = ""
+    state: str = "inactive"   # "firing" | "pending" | "inactive"
+    duration_s: float = 0.0   # el `for:`
+    labels: dict[str, str] = field(default_factory=dict)
+    annotations: dict[str, str] = field(default_factory=dict)
+    health: str = "unknown"   # "ok" | "err" | "unknown"
+    last_error: str = ""
+    active: int = 0           # cuántas alertas tiene disparadas o pendientes
+
+
+@dataclass(frozen=True)
 class Target:
     """Un target de scrape, como lo reporta el backend."""
 
@@ -139,6 +179,14 @@ class MetricsPort(Protocol):
 
     async def targets(self) -> list[Target]:
         """Targets de scrape con su salud."""
+        ...
+
+    async def alerts(self) -> list[Alert]:
+        """Alertas firing o pending según el evaluador de reglas del backend."""
+        ...
+
+    async def rules(self) -> list[Rule]:
+        """Las reglas de alerta configuradas, con su expresión y su estado."""
         ...
 
     async def check(self) -> None:

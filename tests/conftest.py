@@ -28,6 +28,8 @@ class FakePrometheus:
     series: dict[str, list[dict]] = field(default_factory=dict)
     targets: list[dict] = field(default_factory=list)
     labels: dict[str, list[str]] = field(default_factory=dict)
+    alerts: list[dict] = field(default_factory=list)
+    rule_groups: list[dict] = field(default_factory=list)
     calls: list[tuple[str, dict]] = field(default_factory=list)
     fail_with: int | None = None
 
@@ -61,6 +63,12 @@ class FakePrometheus:
         if path == "/api/v1/targets":
             return self._ok({"activeTargets": self.targets})
 
+        if path == "/api/v1/alerts":
+            return self._ok({"alerts": self.alerts})
+
+        if path == "/api/v1/rules":
+            return self._ok({"groups": self.rule_groups})
+
         return httpx.Response(404, json={"status": "error", "error": f"sin ruta: {path}"})
 
     @staticmethod
@@ -74,6 +82,26 @@ def vector(labels: dict[str, str], value: float, ts: float = 1700000000.0) -> di
 
 def matrix(labels: dict[str, str], values: list[tuple[float, float]]) -> dict:
     return {"metric": labels, "values": [[t, str(v)] for t, v in values]}
+
+
+def alert(name: str, state: str = "firing", **labels: str) -> dict:
+    """Una alerta como la devuelve /api/v1/alerts, con nanosegundos en activeAt."""
+    return {
+        "labels": {"alertname": name, **labels},
+        "annotations": {"summary": f"{name} resumen"},
+        "state": state,
+        "activeAt": "2026-09-11T10:00:00.123456789Z",
+        "value": "1e+00",
+    }
+
+
+def rule(name: str, query: str, state: str = "inactive", alerts: int = 0, **extra: Any) -> dict:
+    """Una regla de alerta como la devuelve /api/v1/rules."""
+    return {
+        "type": "alerting", "name": name, "query": query, "duration": 300,
+        "state": state, "health": "ok", "labels": {"severity": "warning"},
+        "annotations": {}, "alerts": [{} for _ in range(alerts)], **extra,
+    }
 
 
 @pytest.fixture

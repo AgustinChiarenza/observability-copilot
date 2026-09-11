@@ -84,7 +84,14 @@ Correr una tool sola, sin gastar un token ni depender del LLM:
 
 ```bash
 docker compose exec copilot python -m copilot tool promql_instant '{"query":"up"}'
+docker compose exec copilot python -m copilot tool alerts_active '{}'
 ```
+
+Las alertas se leen del mismo backend de métricas (`/api/v1/alerts` y
+`/api/v1/rules`, que exponen Prometheus, vmalert y los Ruler de Thanos/Mimir):
+qué está firing, desde cuándo, y la expresión de la regla que lo disparó —que
+es la query para correr en rango y explicarlo. Es lo que el backend **evalúa**,
+no lo que **suena**: silences e inhibición son de Alertmanager y llegan en F2.
 
 ## Configuración
 
@@ -137,7 +144,7 @@ editar un `if` en el core para sumar uno, el diseño se rompió.
 
 | | |
 |---|---|
-| **Hecho** | puertos, registro de adapters, config validada al arranque, adapter de Prometheus con presupuesto, adapter de costo por PromQL, adapter de modelo OpenAI-compatible, canales log y webhook, loop del agente, 7 tools de lectura, auditoría, API con auth, métricas propias, imagen y compose |
+| **Hecho** | puertos, registro de adapters, config validada al arranque, adapter de Prometheus con presupuesto, adapter de costo por PromQL, adapter de modelo OpenAI-compatible, canales log y webhook, loop del agente, 9 tools de lectura (métricas, alertas y costo), auditoría, API con auth, métricas propias, imagen y compose |
 | **F1** | el adapter de métricas contra Thanos/Mimir/VictoriaMetrics en CI, mTLS, SigV4 |
 | **F2** | `POST /v1/alerts` con el esquema de Alertmanager, enriquecimiento y triage |
 | **F3** | canales de verdad: SMN/SMS, Slack con bloques, Teams, mail — con dedup, quiet hours y tope diario |

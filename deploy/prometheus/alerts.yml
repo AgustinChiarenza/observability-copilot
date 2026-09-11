@@ -1,0 +1,13 @@
+# Una regla de alerta, a propósito sobre el target caído del prometheus.yml:
+# así el Prometheus de juguete tiene algo firing y `alerts_active` /
+# `alert_rules` se pueden verificar contra la API real, no sólo contra el doble.
+groups:
+  - name: juguete
+    rules:
+      - alert: TargetCaido
+        expr: up == 0
+        for: 10s
+        labels:
+          severity: warning
+        annotations:
+          summary: "El target {{ $labels.instance }} del job {{ $labels.job }} está caído"

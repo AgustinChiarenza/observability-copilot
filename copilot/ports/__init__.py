@@ -14,10 +14,12 @@ enchufable y nadie se va a dar cuenta hasta el segundo cliente.
 from .alerts import Signal, SignalStatus
 from .cost import CostPoint, CostPort, CostSlice
 from .metrics import (
+    Alert,
     Instant,
     MetricsError,
     MetricsPort,
     Range,
+    Rule,
     Sample,
     Series,
     Target,
@@ -26,6 +28,7 @@ from .model import ModelPort, ModelReply
 from .notify import Delivery, Message, NotifyPort, Severity
 
 __all__ = [
+    "Alert",
     "CostPoint",
     "CostPort",
     "CostSlice",
@@ -38,6 +41,7 @@ __all__ = [
     "ModelReply",
     "NotifyPort",
     "Range",
+    "Rule",
     "Sample",
     "Series",
     "Severity",

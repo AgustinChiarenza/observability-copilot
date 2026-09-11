@@ -100,6 +100,22 @@ echo "$salida" | grep -q '"up": 2'    || fail "no contó 2 arriba: $salida"
 echo "$salida" | grep -q caido_a_proposito || fail "no identificó el target caído"
 ok "targets_health lee el Prometheus real: 2 de 3 arriba, el caído identificado"
 
+salida=$(docker compose exec -T copilot python -m copilot tool alert_rules '{}')
+echo "$salida" | grep -q '"name": "TargetCaido"' || fail "alert_rules no vio la regla: $salida"
+echo "$salida" | grep -q '"expression": "up == 0"' || fail "alert_rules no trajo la expresión"
+ok "alert_rules lee las reglas reales, con su expresión"
+
+# La regla tiene `for: 10s`; a esta altura ya pasó de sobra, pero se espera
+# igual por si el evaluador va atrás del scrape.
+for _ in $(seq 1 20); do
+  salida=$(docker compose exec -T copilot python -m copilot tool alerts_active '{}')
+  echo "$salida" | grep -q '"name": "TargetCaido"' && break
+  sleep 1
+done
+echo "$salida" | grep -q '"name": "TargetCaido"' || fail "alerts_active no vio la alerta firing: $salida"
+echo "$salida" | grep -q caido_a_proposito || fail "la alerta no trae los labels del target"
+ok "alerts_active ve la alerta real firing sobre el target caído"
+
 salida=$(docker compose exec -T copilot python -m copilot tool \
   promql_instant '{"query":"up"}')
 echo "$salida" | grep -q '"count": 3' || fail "promql_instant no devolvió 3 series"

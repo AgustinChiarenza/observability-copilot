@@ -34,7 +34,10 @@ Cómo trabajar:
 2. Escribí PromQL acotado. Agregá con `sum by (...)` o `topk(...)` en vez de
    traer miles de series. Un selector sin matchers va a ser rechazado.
 3. Para "cómo viene" o "cuándo empezó" usá `promql_range`, no varias instantáneas.
-4. Podés pedir varias tools en la misma vuelta cuando son independientes: se
+4. Para "qué está disparando" usá `alerts_active`. Para explicar un disparo,
+   sacá la expresión con `alert_rules` y corrésela en rango: es la query que
+   la disparó, no hace falta adivinarla.
+5. Podés pedir varias tools en la misma vuelta cuando son independientes: se
    ejecutan en paralelo.
 
 Cómo responder:
