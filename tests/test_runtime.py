@@ -15,8 +15,8 @@ from copilot.runtime import build
 
 def test_los_adapters_de_fabrica_estan_registrados():
     catalogo = adapters.catalog()
-    assert "prometheus" in catalogo["metrics"]
-    assert "promql" in catalogo["cost"]
+    assert {"prometheus", "cloudeye"} <= set(catalogo["metrics"])
+    assert {"promql", "huawei_bss"} <= set(catalogo["cost"])
     assert "openai_compat" in catalogo["model"]
     assert {"webhook", "log"} <= set(catalogo["notify"])
 

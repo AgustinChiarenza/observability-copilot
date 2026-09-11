@@ -151,7 +151,18 @@ class Target:
 
 @runtime_checkable
 class MetricsPort(Protocol):
-    """Lectura sobre el TSDB del cliente. No hay un solo método que escriba."""
+    """Lectura sobre el TSDB del cliente. No hay un solo método que escriba.
+
+    Dos atributos opcionales que el core lee con `getattr` y default:
+
+      query_syntax     qué acepta `query`. Vacío = PromQL. Un backend que no
+                       habla PromQL (Cloud Eye) lo describe acá, y eso entra
+                       al prompt del sistema: el modelo escribe lo que el
+                       backend entiende, sin que el core sepa cuál es.
+      supports_targets False si el backend no tiene targets de scrape. La
+                       tool `targets_health` se oculta en vez de contestar
+                       "0 de 0", que suena a "todo bien" y es "no aplica".
+    """
 
     name: str
 

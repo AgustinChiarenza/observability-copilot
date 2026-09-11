@@ -27,6 +27,18 @@ metrics:
   #   X-Scope-OrgID: tenant-a     # Mimir/Cortex multi-tenant
   # verify_tls: true
 
+# Si las métricas están en Cloud Eye y no en un Prometheus. No habla PromQL:
+# `query` es un selector NAMESPACE/metric{dim="valor"} y el agente lo aprende
+# del prompt. Necesita `pip install pcnt-copilot[huawei]` o la imagen con
+# --build-arg EXTRAS=huawei. Permisos: ces:metricData:list, ces:metrics:list,
+# ces:alarms:list — lectura, nada más.
+# metrics:
+#   adapter: cloudeye
+#   region: la-south-2
+#   ak: ${HW_AK}
+#   sk: ${HW_SK}
+#   # project_id: ...       # si no, el SDK lo resuelve por la región
+
 # --- Presupuesto de consulta ------------------------------------------------
 # Esto no es una preferencia: es lo único que separa "el agente consulta las
 # métricas" de "el agente le tira abajo el Prometheus de producción". El step de
@@ -53,6 +65,16 @@ cost:
   # Con cuánto atraso llega el dato. Sirve para no gritar por el día que todavía
   # se está llenando, que es la falsa alarma más común de FinOps.
   lag_days: 0
+
+# Si el gasto NO está en la TSDB: la API de facturación de Huawei (BSS). Va un
+# día atrás (lag_days: 1), es global (la credencial no es por proyecto) y sólo
+# necesita bss:bill:list. `edition: cn` para la nube de China.
+# cost:
+#   adapter: huawei_bss
+#   ak: ${HW_AK}
+#   sk: ${HW_SK}
+#   edition: intl
+#   lag_days: 1
 
 # --- Modelo: por defecto, el del cliente ------------------------------------
 # Apuntalo a lo que ya tenga puesto: vLLM, Ollama, TGI, LiteLLM, MaaS, Azure

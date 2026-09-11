@@ -102,6 +102,9 @@ def definitions(ctx: Context | None = None) -> list[dict[str, Any]]:
     for spec in _TOOLS.values():
         if ctx is not None and _needs_cost(spec) and ctx.cost is None:
             continue
+        if ctx is not None and spec.name == "targets_health" and not getattr(
+                ctx.metrics, "supports_targets", True):
+            continue
         salida.append(spec.definition())
     return salida
 

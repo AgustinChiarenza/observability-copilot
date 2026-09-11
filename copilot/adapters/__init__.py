@@ -74,7 +74,9 @@ def _load_builtins() -> None:
     """Importa los adapters que vienen en la caja, tolerando faltantes."""
     for mod in (
         "metrics_prometheus",
+        "metrics_cloudeye",
         "cost_promql",
+        "cost_huawei_bss",
         "model_openai",
         "notify_webhook",
         "notify_log",

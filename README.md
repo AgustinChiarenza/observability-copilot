@@ -93,6 +93,31 @@ qué está firing, desde cuándo, y la expresión de la regla que lo disparó �
 es la query para correr en rango y explicarlo. Es lo que el backend **evalúa**,
 no lo que **suena**: silences e inhibición son de Alertmanager y llegan en F2.
 
+## Si el cliente está en Huawei Cloud
+
+"Lo del Cloud Eye y el BSS el cliente ya lo tiene": dos adapters, cero
+cambios en el core, y el SDK sólo entra si se pide (`pcnt-copilot[huawei]` o
+`--build-arg EXTRAS=huawei`).
+
+- **`metrics: cloudeye`** — Cloud Eye no habla PromQL y el adapter no lo
+  finge. `query` es un selector `SYS.ECS/cpu_util{instance_id="..."}`, sin
+  funciones; sin dimensiones consulta todos los recursos que reportan esa
+  métrica, acotado por el presupuesto. El adapter declara `query_syntax` y eso
+  entra al prompt del sistema, así que el modelo escribe lo que el backend
+  entiende sin que el core sepa cuál es. Las alarmas salen de las reglas y del
+  historial de Cloud Eye; `targets_health` desaparece del catálogo porque no
+  hay targets de scrape — mejor que contestar "0 de 0".
+- **`cost: huawei_bss`** — los fee records de BSS agrupados por día, servicio
+  y recurso. Va un día atrás (`lag_days: 1`), se pagina en paralelo y se
+  recuerda diez minutos: el agente pregunta tres veces por lo mismo en un
+  turno y BSS no tiene por qué enterarse tres veces. Sigue siendo el camino
+  secundario: si el gasto ya está en la TSDB, `promql` llega antes y sin
+  credenciales nuevas.
+
+Los dos están probados contra clientes falsos con los modelos reales del SDK.
+Contra la nube de verdad los prueba `copilot preflight` con las credenciales
+del cliente, que es donde corresponde.
+
 ## Alarmas de gasto
 
 El agente contesta; el detector avisa solo. Corre dentro del mismo contenedor,
@@ -186,7 +211,7 @@ editar un `if` en el core para sumar uno, el diseño se rompió.
 
 | | |
 |---|---|
-| **Hecho** | puertos, registro de adapters, config validada al arranque, adapter de Prometheus con presupuesto, adapter de costo por PromQL, adapter de modelo OpenAI-compatible, loop del agente, 9 tools de lectura (métricas, alertas y costo), auditoría, API con auth, métricas propias, imagen y compose; **detector de pico de gasto** con despachante (dedup, quiet hours, tope diario) y canales log, webhook y SMN |
+| **Hecho** | puertos, registro de adapters, config validada al arranque, adapters de métricas Prometheus y Cloud Eye con presupuesto, adapters de costo PromQL y BSS, adapter de modelo OpenAI-compatible, loop del agente, 9 tools de lectura (métricas, alertas y costo), auditoría, API con auth, métricas propias, imagen y compose; **detector de pico de gasto** con despachante (dedup, quiet hours, tope diario) y canales log, webhook y SMN |
 | **F1** | el adapter de métricas contra Thanos/Mimir/VictoriaMetrics en CI, mTLS, SigV4 |
 | **F2** | `POST /v1/alerts` con el esquema de Alertmanager, enriquecimiento y triage |
 | **F3** | más canales: Slack con bloques, Teams, mail; persistir el estado del despachante |

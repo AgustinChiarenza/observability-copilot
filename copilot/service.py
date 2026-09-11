@@ -67,9 +67,15 @@ async def answer(
     ctx = rt.context()
     run_id = uuid.uuid4().hex[:12]
 
-    mensajes: list[dict[str, Any]] = [
-        {"role": "system", "content": rt.config.agent.system_prompt or SYSTEM_PROMPT},
-    ]
+    prompt = rt.config.agent.system_prompt or SYSTEM_PROMPT
+    # Un backend que no habla PromQL dice acá qué habla. Va al final, después
+    # de las reglas: es la excepción, no la regla.
+    sintaxis = getattr(rt.metrics, "query_syntax", "")
+    if sintaxis:
+        prompt += (
+            "\nSINTAXIS DE `query` EN ESTA INSTALACIÓN (no es PromQL; ignorá los "
+            "ejemplos PromQL de las tools):\n" + sintaxis.strip() + "\n")
+    mensajes: list[dict[str, Any]] = [{"role": "system", "content": prompt}]
     mensajes += list(history or [])
     mensajes.append({"role": "user", "content": question})
 

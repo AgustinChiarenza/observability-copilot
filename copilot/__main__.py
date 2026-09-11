@@ -187,7 +187,9 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
     try:
         return args.fn(args)
-    except ConfigError as e:
+    except (ConfigError, adapters.UnknownAdapter, ValueError) as e:
+        # Un adapter que no puede armarse (opción que falta, SDK no instalado)
+        # es un error de configuración: se dice en una línea, sin traceback.
         print(f"\n{e}\n", file=sys.stderr)
         return 2
 
