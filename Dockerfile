@@ -9,7 +9,11 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 COPY pyproject.toml ./
 COPY copilot ./copilot
-RUN pip install --no-cache-dir .
+# EXTRAS elige qué SDKs de proveedor entran en la imagen. Vacío = ninguno: la
+# imagen genérica no lleva el SDK de Huawei, y la de un cliente Huawei se
+# construye con --build-arg EXTRAS=huawei.
+ARG EXTRAS=""
+RUN pip install --no-cache-dir ".${EXTRAS:+[$EXTRAS]}"
 
 # --- runtime ---------------------------------------------------------------
 FROM python:3.12-slim

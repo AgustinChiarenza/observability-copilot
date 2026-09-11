@@ -116,6 +116,18 @@ echo "$salida" | grep -q '"name": "TargetCaido"' || fail "alerts_active no vio l
 echo "$salida" | grep -q caido_a_proposito || fail "la alerta no trae los labels del target"
 ok "alerts_active ve la alerta real firing sobre el target caído"
 
+# El "¿llega?" de la instalación: un mensaje de prueba por cada canal,
+# salteando dedup, quiet hours y tope. Acá el canal es el log.
+salida=$(docker compose exec -T copilot python -m copilot notify-test)
+echo "$salida" | grep -q '\[OK   \] ops' || fail "notify-test no entregó por el canal: $salida"
+ok "notify-test entrega por todos los canales configurados"
+
+# El detector contra un costo que no existe en el Prometheus de juguete tiene
+# que decir que no hay datos — no inventar un baseline, no explotar.
+salida=$(docker compose exec -T copilot python -m copilot detect cost_spike --dry-run)
+echo "$salida" | grep -q '"outcome": "no_data"' || fail "cost_spike no reportó no_data: $salida"
+ok "cost_spike sin datos de costo lo dice, sin inventar"
+
 salida=$(docker compose exec -T copilot python -m copilot tool \
   promql_instant '{"query":"up"}')
 echo "$salida" | grep -q '"count": 3' || fail "promql_instant no devolvió 3 series"

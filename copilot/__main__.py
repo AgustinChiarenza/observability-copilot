@@ -106,6 +106,42 @@ def _cmd_ask(args) -> int:
     return 0
 
 
+def _cmd_notify_test(args) -> int:
+    """Manda un mensaje de prueba por todos los canales, salteando la política.
+    Es el "¿llega?" de la instalación."""
+    from .ports.notify import Message, Severity
+
+    cfg = load(args.config)
+    rt = build(cfg)
+    m = Message(title="Copilot: mensaje de prueba", body=args.body,
+                severity=Severity.INFO, fingerprint="notify_test")
+    out = asyncio.run(rt.dispatcher.send(m, force=True))
+    fallas = 0
+    for d in out.deliveries:
+        marca = "OK  " if d.ok else "FALLA"
+        fallas += 0 if d.ok else 1
+        print(f"  [{marca:<5}] {d.channel:<18} {d.detail}")
+    return 1 if fallas or not out.deliveries else 0
+
+
+def _cmd_detect(args) -> int:
+    """Corre un detector una vez. Con --dry-run evalúa y no despacha."""
+    from .detectors import cost_spike
+
+    cfg = load(args.config)
+    rt = build(cfg)
+    if args.dry_run:
+        if rt.cost is None:
+            print("No hay CostPort configurado.", file=sys.stderr)
+            return 2
+        v = asyncio.run(cost_spike.evaluate(rt.cost, cfg.detectors.cost_spike))
+        salida = v.as_dict()
+    else:
+        salida = asyncio.run(cost_spike.run_once(rt))
+    print(json.dumps(salida, ensure_ascii=False, indent=2, default=str))
+    return 0 if salida["outcome"] in ("spike", "clear", "no_data") else 1
+
+
 def _cmd_serve(args) -> int:
     import uvicorn
 
@@ -133,6 +169,15 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("tool")
     t.add_argument("args", nargs="?", default="", help='Argumentos en JSON, ej: \'{"query":"up"}\'')
     t.set_defaults(fn=_cmd_tool)
+
+    nt = sub.add_parser("notify-test", help="Manda un mensaje de prueba por cada canal")
+    nt.add_argument("--body", default="Si estás leyendo esto, el canal quedó enchufado.")
+    nt.set_defaults(fn=_cmd_notify_test)
+
+    det = sub.add_parser("detect", help="Corre un detector una vez")
+    det.add_argument("detector", choices=["cost_spike"])
+    det.add_argument("--dry-run", action="store_true", help="Evalúa sin despachar")
+    det.set_defaults(fn=_cmd_detect)
 
     ask = sub.add_parser("ask", help="Una pregunta, desde la terminal")
     ask.add_argument("question")

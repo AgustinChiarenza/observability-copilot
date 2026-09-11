@@ -134,3 +134,51 @@ def test_lo_consultado_queda_en_la_auditoria(client, model, prom):
 
 def test_un_mensaje_vacio_se_rechaza_en_el_borde(client):
     assert client.post("/v1/chat", headers=AUTH, json={"message": ""}).status_code == 422
+
+
+# --- Notificaciones y detectores -------------------------------------------
+
+
+@pytest.fixture
+def client_con_canal(config, metrics_port, model, monkeypatch):
+    from copilot import runtime as runtime_mod
+    from copilot.adapters.notify_log import LogNotifier
+    from copilot.dispatch import Dispatcher
+
+    canal = LogNotifier(name="ops")
+
+    def _build(cfg):
+        return runtime_mod.Runtime(config=cfg, metrics=metrics_port, model=model,
+                                   notify=[canal], dispatcher=Dispatcher([canal]))
+
+    monkeypatch.setattr("copilot.api.app.build", _build)
+    with TestClient(create_app(config)) as c:
+        yield c, canal
+
+
+def test_notify_test_llega_al_canal_y_queda_en_el_historial(client_con_canal):
+    """Es lo que se corre en lo del cliente antes de irse."""
+    c, canal = client_con_canal
+    r = c.post("/v1/notify/test", headers=AUTH, json={"body": "hola"})
+    assert r.status_code == 200
+    assert r.json()["decision"] == "sent"
+    assert canal.sent[-1].body == "hola"
+    estado = c.get("/v1/notify", headers=AUTH).json()
+    assert estado["channels"] == ["ops"]
+    assert estado["recent"][-1]["fingerprint"] == "notify_test"
+
+
+def test_notify_exige_token(client_con_canal):
+    c, _ = client_con_canal
+    assert c.post("/v1/notify/test", json={}).status_code == 401
+
+
+def test_correr_el_detector_sin_costos_lo_dice(client_con_canal):
+    c, _ = client_con_canal
+    r = c.post("/v1/detectors/cost_spike/run", headers=AUTH)
+    assert r.status_code == 200
+    assert r.json()["outcome"] == "no_data"
+
+
+def test_status_reporta_el_detector(client):
+    assert "cost_spike" in client.get("/v1/status", headers=AUTH).json()["detectors"]

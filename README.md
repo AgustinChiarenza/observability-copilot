@@ -93,6 +93,46 @@ qué está firing, desde cuándo, y la expresión de la regla que lo disparó �
 es la query para correr en rango y explicarlo. Es lo que el backend **evalúa**,
 no lo que **suena**: silences e inhibición son de Alertmanager y llegan en F2.
 
+## Alarmas de gasto
+
+El agente contesta; el detector avisa solo. Corre dentro del mismo contenedor,
+cada `interval`, y aplica una regla que está en código y no en un prompt:
+
+> último día completo / mediana de la ventana ≥ `threshold`
+
+Mediana y no promedio, para que un pico anterior no tape el siguiente. "Último
+día completo" respeta el `lag_days` del costo: el día que todavía se está
+llenando siempre parece raro, y es la falsa alarma más común de FinOps. El
+aviso sale con el desglose por servicio de ese día, que es lo que lo hace
+accionable.
+
+```yaml
+detectors:
+  cost_spike: {enabled: true, interval: 1h, window_days: 14, threshold: 1.5}
+```
+
+Lo que sale pasa por **una** política, igual para todos los canales, en
+[`copilot/dispatch.py`](copilot/dispatch.py): el mismo aviso no se repite antes
+de `repeat_interval`, lo que no es crítico espera fuera de `quiet_hours`, y hay
+un `daily_cap` por canal que al alcanzarse manda un último aviso y calla hasta
+el día siguiente. Es la línea que separa "un bug en el detector" de "200 SMS
+una madrugada".
+
+Canales: `log`, `webhook` (Slack, Teams, lo que reciba JSON) y `smn` de Huawei
+(SMS, mail o HTTP, lo que tenga suscripto el topic). SMN es la primera pieza
+con SDK propio y por eso es un extra: `pip install pcnt-copilot[huawei]`, o la
+imagen con `--build-arg EXTRAS=huawei`. La imagen genérica no lo lleva.
+
+Antes de irte de lo del cliente:
+
+```bash
+docker compose exec copilot python -m copilot notify-test          # ¿llega?
+docker compose exec copilot python -m copilot detect cost_spike --dry-run
+```
+
+Lo mismo por API: `POST /v1/notify/test`, `POST /v1/detectors/cost_spike/run`
+y `GET /v1/notify` para ver qué pasó con los últimos mensajes y por qué.
+
 ## Configuración
 
 Todo en un YAML que el cliente puede versionar en su repo de infra, sin un solo
@@ -127,7 +167,9 @@ copilot/
   ports/        los Protocol. Es lo único que conoce el core.
   adapters/     lo específico de cada backend. Se registran con un decorador.
   agent/        loop con presupuesto, catálogo de tools, permisos, auditoría.
-  api/          FastAPI: /v1/chat, /v1/status, /v1/tools, /v1/audit, salud.
+  detectors/    lo que corre solo y avisa. Hoy: pico de gasto.
+  dispatch.py   la política de entrega, una para todos los canales.
+  api/          FastAPI: /v1/chat, /v1/status, /v1/tools, /v1/audit, /v1/notify, salud.
   telemetry/    las métricas del propio copiloto, en /metrics.
 ```
 
@@ -144,11 +186,10 @@ editar un `if` en el core para sumar uno, el diseño se rompió.
 
 | | |
 |---|---|
-| **Hecho** | puertos, registro de adapters, config validada al arranque, adapter de Prometheus con presupuesto, adapter de costo por PromQL, adapter de modelo OpenAI-compatible, canales log y webhook, loop del agente, 9 tools de lectura (métricas, alertas y costo), auditoría, API con auth, métricas propias, imagen y compose |
+| **Hecho** | puertos, registro de adapters, config validada al arranque, adapter de Prometheus con presupuesto, adapter de costo por PromQL, adapter de modelo OpenAI-compatible, loop del agente, 9 tools de lectura (métricas, alertas y costo), auditoría, API con auth, métricas propias, imagen y compose; **detector de pico de gasto** con despachante (dedup, quiet hours, tope diario) y canales log, webhook y SMN |
 | **F1** | el adapter de métricas contra Thanos/Mimir/VictoriaMetrics en CI, mTLS, SigV4 |
 | **F2** | `POST /v1/alerts` con el esquema de Alertmanager, enriquecimiento y triage |
-| **F3** | canales de verdad: SMN/SMS, Slack con bloques, Teams, mail — con dedup, quiet hours y tope diario |
-| **F4** | detector de pico de gasto |
+| **F3** | más canales: Slack con bloques, Teams, mail; persistir el estado del despachante |
 | **F5** | análisis declarativos en YAML |
 | **F6** | bot de Slack y Teams |
 | **F7** | Helm, NetworkPolicy, SBOM, política IAM read-only, guía de instalación |

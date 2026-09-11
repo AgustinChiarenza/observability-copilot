@@ -23,7 +23,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
-from .. import telemetry
+from .. import scheduler, telemetry
 from ..config import Config, ConfigError, load
 from ..runtime import Runtime, build
 from .routes import router
@@ -54,7 +54,11 @@ def create_app(config: Config | None = None) -> FastAPI:
                 logger.info("preflight: todos los puertos responden")
         except Exception as e:
             logger.warning("preflight: no se pudo chequear (%s)", e)
-        yield
+        tareas = scheduler.start(app.state.runtime)
+        try:
+            yield
+        finally:
+            await scheduler.stop(tareas)
 
     app = FastAPI(
         title="Copilot",

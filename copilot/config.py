@@ -20,12 +20,14 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import time, timedelta
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+from .detectors.cost_spike import SpikeConfig
+from .dispatch import Policy, QuietHours
 from .ports.metrics import Budget
 
 DEFAULT_PATH = os.getenv("COPILOT_CONFIG", "/etc/copilot/copilot.yaml")
@@ -131,6 +133,57 @@ class ServerConfig:
 
 
 @dataclass
+class DetectorsConfig:
+    cost_spike: SpikeConfig = field(default_factory=SpikeConfig)
+
+
+def _parse_hhmm(raw: Any, *, where: str) -> time:
+    try:
+        h, m = str(raw).split(":")
+        return time(int(h), int(m))
+    except (ValueError, AttributeError) as e:
+        raise ConfigError(f"{where}: '{raw}' no es una hora. Usá HH:MM, por ejemplo 22:00.") from e
+
+
+def _parse_dispatch(raw: dict[str, Any]) -> Policy:
+    qh = raw.get("quiet_hours") or None
+    quiet = None
+    if qh:
+        if not isinstance(qh, dict) or "start" not in qh or "end" not in qh:
+            raise ConfigError("dispatch.quiet_hours: necesita `start` y `end` (HH:MM).")
+        tz = str(qh.get("tz", "UTC"))
+        try:
+            from zoneinfo import ZoneInfo
+            ZoneInfo(tz)
+        except Exception as e:
+            raise ConfigError(f"dispatch.quiet_hours.tz: '{tz}' no es una zona horaria "
+                              f"válida (ej: America/Argentina/Buenos_Aires).") from e
+        quiet = QuietHours(
+            start=_parse_hhmm(qh["start"], where="dispatch.quiet_hours.start"),
+            end=_parse_hhmm(qh["end"], where="dispatch.quiet_hours.end"),
+            tz=tz,
+        )
+    return Policy(
+        repeat_interval=parse_duration(
+            raw.get("repeat_interval", "4h"), where="dispatch.repeat_interval"),
+        quiet_hours=quiet,
+        daily_cap=int(raw.get("daily_cap", 50)),
+    )
+
+
+def _parse_detectors(raw: dict[str, Any]) -> DetectorsConfig:
+    cs = raw.get("cost_spike") or {}
+    return DetectorsConfig(cost_spike=SpikeConfig(
+        enabled=bool(cs.get("enabled", False)),
+        interval=parse_duration(cs.get("interval", "1h"), where="detectors.cost_spike.interval"),
+        window_days=int(cs.get("window_days", 14)),
+        threshold=float(cs.get("threshold", 1.5)),
+        min_amount=float(cs.get("min_amount", 0)),
+        min_days=int(cs.get("min_days", 5)),
+    ))
+
+
+@dataclass
 class Config:
     server: ServerConfig = field(default_factory=ServerConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
@@ -139,6 +192,8 @@ class Config:
     model: AdapterConfig | None = None
     notify: list[AdapterConfig] = field(default_factory=list)
     budget: Budget = field(default_factory=Budget)
+    dispatch: Policy = field(default_factory=Policy)
+    detectors: DetectorsConfig = field(default_factory=DetectorsConfig)
     source_path: str = ""
 
     @classmethod
@@ -189,6 +244,8 @@ class Config:
                    if raw.get("model") else None),
             notify=[AdapterConfig.parse(c, where=f"notify[{i}]")
                     for i, c in enumerate(notify_raw)],
+            dispatch=_parse_dispatch(raw.get("dispatch") or {}),
+            detectors=_parse_detectors(raw.get("detectors") or {}),
             source_path=source_path,
         )
 
@@ -212,6 +269,19 @@ class Config:
             out.append("agent.max_steps: tiene que ser al menos 1.")
         if self.budget.max_series < 1:
             out.append("budget.max_series: tiene que ser al menos 1.")
+
+        cs = self.detectors.cost_spike
+        if cs.enabled and self.cost is None:
+            out.append(
+                "detectors.cost_spike: está habilitado pero no hay bloque `cost`. "
+                "Sin costos no hay nada que detectar.")
+        if cs.threshold <= 1:
+            out.append("detectors.cost_spike.threshold: tiene que ser mayor que 1 "
+                       "(1.5 = un 50% por encima de la mediana).")
+        if cs.window_days < cs.min_days:
+            out.append("detectors.cost_spike.window_days: tiene que ser al menos min_days.")
+        if self.dispatch.daily_cap < 1:
+            out.append("dispatch.daily_cap: tiene que ser al menos 1.")
 
         vistos: set[str] = set()
         for i, canal in enumerate(self.notify):

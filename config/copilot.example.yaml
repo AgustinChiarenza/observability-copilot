@@ -67,10 +67,10 @@ model:
   # require_https: true   # prendelo en producción
 
 # --- Notificaciones ---------------------------------------------------------
-# En F0 hay webhook y log. Slack con bloques, Teams, mail y SMN/SMS son de F3.
-# El dedup, las quiet hours y el tope diario NO viven en el canal: van una capa
-# arriba, iguales para todos, porque lo que te desinstala no es un bug del
-# adapter de Slack, es mandar 200 SMS una madrugada.
+# Un canal es tonto: recibe y entrega. El dedup, las quiet hours y el tope
+# diario NO viven en el canal: van en `dispatch`, iguales para todos, porque lo
+# que te desinstala no es un bug del adapter de Slack, es mandar 200 SMS una
+# madrugada. Slack con bloques, Teams y mail son de F3.
 notify:
   - name: ops
     adapter: log
@@ -78,6 +78,40 @@ notify:
   #   adapter: webhook
   #   url: ${SLACK_WEBHOOK_URL}
   #   template: slack
+  # SMN de Huawei: un topic, y atrás lo que el cliente haya suscripto (SMS,
+  # mail, HTTP). Necesita `pip install pcnt-copilot[huawei]` o la imagen
+  # construida con --build-arg EXTRAS=huawei.
+  # - name: guardia
+  #   adapter: smn
+  #   region: la-south-2
+  #   topic_urn: ${SMN_TOPIC_URN}
+  #   ak: ${HW_AK}
+  #   sk: ${HW_SK}
+  #   max_chars: 400        # un SMS recorta a ~490 bytes; con sólo mail, subilo
+
+# La política de entrega. Una para todos los canales.
+dispatch:
+  # El mismo aviso (mismo fingerprint) no se repite antes de esto.
+  repeat_interval: 4h
+  # Lo que no es crítico espera a que termine la ventana. Lo crítico pasa.
+  # quiet_hours:
+  #   start: "22:00"
+  #   end: "07:00"
+  #   tz: America/Argentina/Buenos_Aires
+  # Por canal y por día. Al llegar, sale UN aviso más y después nada hasta mañana.
+  daily_cap: 50
+
+# --- Detectores: lo que corre solo y avisa ---------------------------------
+# El LLM no participa: un número que dispara un SMS a las 4 de la mañana se
+# calcula en código, se testea y se explica en una línea.
+detectors:
+  cost_spike:
+    enabled: false          # pide el bloque `cost` de arriba
+    interval: 1h
+    window_days: 14         # la ventana del baseline
+    threshold: 1.5          # último día completo / mediana de la ventana
+    min_amount: 0           # piso en la moneda del costo: pasar de 2 a 6 no le importa a nadie
+    min_days: 5             # con menos días con dato no hay baseline y no se opina
 
 # --- Agente -----------------------------------------------------------------
 agent:

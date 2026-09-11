@@ -23,6 +23,7 @@ from typing import Any
 from . import adapters
 from .agent.registry import Context
 from .config import Config
+from .dispatch import Dispatcher
 from .ports.cost import CostPort
 from .ports.metrics import MetricsPort
 from .ports.model import ModelPort
@@ -38,6 +39,7 @@ class Runtime:
     cost: CostPort | None = None
     model: ModelPort | None = None
     notify: list[NotifyPort] = field(default_factory=list)
+    dispatcher: Dispatcher = field(default_factory=lambda: Dispatcher([]))
 
     def context(self) -> Context:
         """Lo que ven las tools."""
@@ -111,6 +113,9 @@ def build(config: Config) -> Runtime:
         logger.warning(
             "notify: no hay canales configurados; las notificaciones van al log.")
         rt.notify.append(adapters.build("notify", "log", {}, name="log"))
+
+    # La política es una para todos los canales; por eso vive acá y no en ellos.
+    rt.dispatcher = Dispatcher(rt.notify, config.dispatch)
 
     logger.info("runtime armado: %s", rt.describe())
     return rt

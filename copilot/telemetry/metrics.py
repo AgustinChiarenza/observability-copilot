@@ -47,6 +47,19 @@ TOOL_LATENCY = Histogram(
     buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 40, 80),
 )
 
+NOTIFY_OUTCOMES = Counter(
+    "copilot_notify_outcomes_total", "Qué decidió el despachante por cada mensaje",
+    ["decision"], registry=REGISTRY,   # sent | deduped | quiet | capped | no_channels
+)
+NOTIFY_DELIVERIES = Counter(
+    "copilot_notify_deliveries_total", "Entregas por canal",
+    ["channel", "ok"], registry=REGISTRY,   # ok: true | false | capped
+)
+DETECTOR_RUNS = Counter(
+    "copilot_detector_runs_total", "Corridas de cada detector",
+    ["detector", "outcome"], registry=REGISTRY,   # spike | clear | no_data | error
+)
+
 PORT_CHECKS = Gauge(
     "copilot_port_up", "1 si el puerto respondió al último chequeo",
     ["port"], registry=REGISTRY,

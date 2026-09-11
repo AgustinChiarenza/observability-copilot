@@ -17,6 +17,8 @@ from pydantic import BaseModel, Field
 from .. import service, telemetry
 from ..agent import audit, registry
 from ..agent.permissions import classified
+from ..detectors import cost_spike
+from ..ports.notify import Message, Severity
 from ..runtime import Runtime
 
 logger = logging.getLogger(__name__)
@@ -63,6 +65,14 @@ async def status(request: Request) -> dict[str, Any]:
             "max_series": rt.config.budget.max_series,
             "max_points": rt.config.budget.max_points,
             "max_range_days": rt.config.budget.max_range.days,
+        },
+        "detectors": {
+            cost_spike.NAME: {
+                "enabled": rt.config.detectors.cost_spike.enabled and rt.cost is not None,
+                "interval_s": rt.config.detectors.cost_spike.interval.total_seconds(),
+                "threshold": rt.config.detectors.cost_spike.threshold,
+                "window_days": rt.config.detectors.cost_spike.window_days,
+            },
         },
     }
 
@@ -147,3 +157,38 @@ async def audit_timeline(
         "note": "Buffer en memoria: se pierde al reiniciar. La persistencia es de F7.",
         "entries": audit.timeline(limit=min(limit, 500), tool=tool, only_errors=only_errors),
     }
+
+
+# --- Notificaciones y detectores -------------------------------------------
+
+
+class NotifyTestRequest(BaseModel):
+    title: str = Field(default="Copilot: mensaje de prueba", max_length=200)
+    body: str = Field(default="Si estás leyendo esto, el canal quedó enchufado.",
+                      max_length=2000)
+    severity: Severity = Severity.INFO
+    #: Saltea dedup, quiet hours y tope. Es para la instalación: "¿llega?".
+    force: bool = True
+
+
+@router.get("/v1/notify")
+async def notify_status(request: Request) -> dict[str, Any]:
+    """Qué canales hay, con qué política, y qué pasó con los últimos mensajes."""
+    return _rt(request).dispatcher.summary()
+
+
+@router.post("/v1/notify/test")
+async def notify_test(request: Request, body: NotifyTestRequest) -> dict[str, Any]:
+    """Manda un mensaje de prueba por todos los canales. Es lo que se corre en
+    lo del cliente antes de irse, para no descubrir el sábado que el SMS no
+    llegaba."""
+    m = Message(title=body.title, body=body.body, severity=body.severity,
+                fingerprint="notify_test")
+    return (await _rt(request).dispatcher.send(m, force=body.force)).as_dict()
+
+
+@router.post("/v1/detectors/cost_spike/run")
+async def cost_spike_run(request: Request) -> dict[str, Any]:
+    """Evalúa el detector ahora mismo y, si hay pico, lo despacha con la
+    política normal (dedup incluido: correrlo dos veces no manda dos SMS)."""
+    return await cost_spike.run_once(_rt(request))

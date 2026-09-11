@@ -78,6 +78,7 @@ def _load_builtins() -> None:
         "model_openai",
         "notify_webhook",
         "notify_log",
+        "notify_smn",
     ):
         try:
             __import__(f"{__name__}.{mod}")
