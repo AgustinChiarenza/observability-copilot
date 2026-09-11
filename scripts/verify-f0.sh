@@ -29,8 +29,11 @@ ok()   { printf '  \033[32m[OK]\033[0m    %s\n' "$1"; }
 fail() { printf '  \033[31m[FALLA]\033[0m %s\n' "$1"; exit 1; }
 skip() { printf '  \033[33m[SALTEA]\033[0m %s\n' "$1"; }
 
-cleanup() { docker compose down -v >/dev/null 2>&1 || true; }
+cleanup() { docker compose down -v >/dev/null 2>&1 || true; rm -f deploy/alertmanager/token; }
 trap cleanup EXIT
+
+# El token va a Alertmanager como archivo (no expande variables de entorno).
+printf '%s' "$TOKEN" > deploy/alertmanager/token
 
 echo "→ Levantando el stack"
 docker compose up -d --build >/dev/null
@@ -115,6 +118,20 @@ done
 echo "$salida" | grep -q '"name": "TargetCaido"' || fail "alerts_active no vio la alerta firing: $salida"
 echo "$salida" | grep -q caido_a_proposito || fail "la alerta no trae los labels del target"
 ok "alerts_active ve la alerta real firing sobre el target caído"
+
+# La cadena entera de alertas: Prometheus evalúa → Alertmanager agrupa y
+# manda el webhook → el copiloto lo recibe, lo enriquece y lo entrega. Sin
+# modelo el triage se saltea y la alerta sale pelada, con la regla.
+echo "→ Esperando el webhook de Alertmanager (group_wait + envío)"
+for _ in $(seq 1 60); do
+  salida=$(curl -sf -H "Authorization: Bearer $TOKEN" "${APP}/v1/alerts?limit=5" || true)
+  echo "$salida" | grep -q '"decision": *"sent"' && break
+  sleep 1
+done
+echo "$salida" | grep -q '"name": *"TargetCaido"' || fail "no llegó TargetCaido por /v1/alerts: $salida"
+echo "$salida" | grep -q '"decision": *"sent"' || fail "la alerta no se entregó: $salida"
+echo "$salida" | grep -q '"expression": *"up == 0"' || fail "no se enriqueció con la regla: $salida"
+ok "Alertmanager real → /v1/alerts: recibida, enriquecida con la regla y entregada"
 
 # El "¿llega?" de la instalación: un mensaje de prueba por cada canal,
 # salteando dedup, quiet hours y tope. Acá el canal es el log.

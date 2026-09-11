@@ -60,6 +60,15 @@ DETECTOR_RUNS = Counter(
     ["detector", "outcome"], registry=REGISTRY,   # spike | clear | no_data | error
 )
 
+ALERTS_RECEIVED = Counter(
+    "copilot_alerts_received_total", "Alertas recibidas por /v1/alerts",
+    ["status"], registry=REGISTRY,   # firing | resolved
+)
+ALERTS_PROCESSED = Counter(
+    "copilot_alerts_processed_total", "Qué pasó con cada alerta recibida",
+    ["decision"], registry=REGISTRY,   # sent | deduped | quiet | capped | overloaded | ...
+)
+
 PORT_CHECKS = Gauge(
     "copilot_port_up", "1 si el puerto respondió al último chequeo",
     ["port"], registry=REGISTRY,

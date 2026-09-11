@@ -123,6 +123,18 @@ dispatch:
   # Por canal y por día. Al llegar, sale UN aviso más y después nada hasta mañana.
   daily_cap: 50
 
+# --- Alertas que llegan de Alertmanager ------------------------------------
+# El receiver es POST /v1/alerts con el token en `authorization.credentials`.
+# Lo que llega se decide primero (dedup, quiet hours, tope), y sólo lo que va
+# a salir se enriquece: la expresión de la regla, su tendencia, cuántas otras
+# hay activas, el gasto, y —con `triage`— seis líneas del modelo con hipótesis
+# y qué mirar. Un turno del agente por alerta: es lo que cuesta.
+alerts:
+  triage: true
+  lookback: 1h            # cuánto antes del disparo se mira la expresión
+  max_concurrent: 2       # enriquecimientos a la vez
+  queue_max: 200          # más que esto en vuelo y se descarta con aviso
+
 # --- Detectores: lo que corre solo y avisa ---------------------------------
 # El LLM no participa: un número que dispara un SMS a las 4 de la mañana se
 # calcula en código, se testea y se explica en una línea.

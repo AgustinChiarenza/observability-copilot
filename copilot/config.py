@@ -26,6 +26,7 @@ from typing import Any
 
 import yaml
 
+from .alerts.enrich import EnrichConfig
 from .detectors.cost_spike import SpikeConfig
 from .dispatch import Policy, QuietHours
 from .ports.metrics import Budget
@@ -171,6 +172,15 @@ def _parse_dispatch(raw: dict[str, Any]) -> Policy:
     )
 
 
+def _parse_alerts(raw: dict[str, Any]) -> EnrichConfig:
+    return EnrichConfig(
+        triage=bool(raw.get("triage", True)),
+        lookback=parse_duration(raw.get("lookback", "1h"), where="alerts.lookback"),
+        max_concurrent=int(raw.get("max_concurrent", 2)),
+        queue_max=int(raw.get("queue_max", 200)),
+    )
+
+
 def _parse_detectors(raw: dict[str, Any]) -> DetectorsConfig:
     cs = raw.get("cost_spike") or {}
     return DetectorsConfig(cost_spike=SpikeConfig(
@@ -194,6 +204,7 @@ class Config:
     budget: Budget = field(default_factory=Budget)
     dispatch: Policy = field(default_factory=Policy)
     detectors: DetectorsConfig = field(default_factory=DetectorsConfig)
+    alerts: EnrichConfig = field(default_factory=EnrichConfig)
     source_path: str = ""
 
     @classmethod
@@ -246,6 +257,7 @@ class Config:
                     for i, c in enumerate(notify_raw)],
             dispatch=_parse_dispatch(raw.get("dispatch") or {}),
             detectors=_parse_detectors(raw.get("detectors") or {}),
+            alerts=_parse_alerts(raw.get("alerts") or {}),
             source_path=source_path,
         )
 
@@ -282,6 +294,8 @@ class Config:
             out.append("detectors.cost_spike.window_days: tiene que ser al menos min_days.")
         if self.dispatch.daily_cap < 1:
             out.append("dispatch.daily_cap: tiene que ser al menos 1.")
+        if self.alerts.max_concurrent < 1 or self.alerts.queue_max < 1:
+            out.append("alerts.max_concurrent y alerts.queue_max: tienen que ser al menos 1.")
 
         vistos: set[str] = set()
         for i, canal in enumerate(self.notify):

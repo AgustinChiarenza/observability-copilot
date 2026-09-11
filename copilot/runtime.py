@@ -22,6 +22,7 @@ from typing import Any
 
 from . import adapters
 from .agent.registry import Context
+from .alerts.ingress import AlertLog, Ingress
 from .config import Config
 from .dispatch import Dispatcher
 from .ports.cost import CostPort
@@ -40,10 +41,20 @@ class Runtime:
     model: ModelPort | None = None
     notify: list[NotifyPort] = field(default_factory=list)
     dispatcher: Dispatcher = field(default_factory=lambda: Dispatcher([]))
+    alert_log: AlertLog = field(default_factory=AlertLog)
+    _ingress: Ingress | None = field(default=None, repr=False)
 
     def context(self) -> Context:
         """Lo que ven las tools."""
-        return Context(metrics=self.metrics, cost=self.cost)
+        return Context(metrics=self.metrics, cost=self.cost,
+                       extras={"alert_log": self.alert_log})
+
+    @property
+    def ingress(self) -> Ingress:
+        # Perezoso: el semáforo de asyncio se crea adentro del loop que lo usa.
+        if self._ingress is None:
+            self._ingress = Ingress(self, self.config.alerts, self.alert_log)
+        return self._ingress
 
     def describe(self) -> dict[str, Any]:
         """Qué quedó enchufado. Lo devuelve `/v1/status` y lo imprime preflight."""

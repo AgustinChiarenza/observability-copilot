@@ -10,3 +10,4 @@ build/
 .env
 config/copilot.yaml
 .DS_Store
+deploy/alertmanager/token

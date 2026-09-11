@@ -53,3 +53,14 @@ services:
     ports:
       - "${PROM_HOST_PORT:-9090}:9090"
     restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+    volumes:
+      - ./deploy/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      # El token del copiloto, como archivo: Alertmanager no expande variables
+      # de entorno en su config, y así el secreto no queda en el YAML.
+      - ./deploy/alertmanager/token:/etc/alertmanager/token:ro
+    restart: unless-stopped

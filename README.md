@@ -93,6 +93,37 @@ qué está firing, desde cuándo, y la expresión de la regla que lo disparó �
 es la query para correr en rango y explicarlo. Es lo que el backend **evalúa**,
 no lo que **suena**: silences e inhibición son de Alertmanager y llegan en F2.
 
+## Las alertas que ya suenan
+
+El Alertmanager del cliente ya tiene `for:`, inhibición, silences y dedup en
+HA. No se compite con eso: se le agrega un receiver.
+
+```yaml
+receivers:
+  - name: copilot
+    webhook_configs:
+      - url: http://copilot:8080/v1/alerts
+        send_resolved: true
+        http_config:
+          authorization: {credentials_file: /etc/alertmanager/copilot-token}
+```
+
+`POST /v1/alerts` contesta en milisegundos qué encoló y qué salteó — decide
+primero con la misma política de siempre (dedup por el `fingerprint` de
+Alertmanager, quiet hours, tope) y **sólo lo que va a salir se enriquece**,
+atrás y de a pocos. Una alerta repetida no gasta un token.
+
+Lo que se le agrega es lo que Alertmanager no puede: la expresión de la regla
+(se busca en el backend por nombre; el webhook no la trae), cómo venía esa
+expresión antes del disparo, cuántas otras hay firing, el gasto del día, y —si
+hay modelo— seis líneas de triage con el recurso concreto, la hipótesis y qué
+mirar primero. Cada pieza falla sola: una alerta que no llega porque el
+enriquecimiento explotó es peor que una alerta pelada.
+
+`GET /v1/alerts` y la tool `alerts_received` muestran lo que **sonó** y qué se
+dijo de cada una — a diferencia de `alerts_active`, que es lo que el backend
+evalúa antes de silences. "¿Qué pasó anoche?" se contesta con la primera.
+
 ## Si el cliente está en Huawei Cloud
 
 "Lo del Cloud Eye y el BSS el cliente ya lo tiene": dos adapters, cero
@@ -192,9 +223,10 @@ copilot/
   ports/        los Protocol. Es lo único que conoce el core.
   adapters/     lo específico de cada backend. Se registran con un decorador.
   agent/        loop con presupuesto, catálogo de tools, permisos, auditoría.
+  alerts/       el webhook de Alertmanager → decidir → enriquecer → entregar.
   detectors/    lo que corre solo y avisa. Hoy: pico de gasto.
   dispatch.py   la política de entrega, una para todos los canales.
-  api/          FastAPI: /v1/chat, /v1/status, /v1/tools, /v1/audit, /v1/notify, salud.
+  api/          FastAPI: /v1/chat, /v1/alerts, /v1/notify, /v1/status, /v1/tools, /v1/audit, salud.
   telemetry/    las métricas del propio copiloto, en /metrics.
 ```
 
@@ -211,9 +243,9 @@ editar un `if` en el core para sumar uno, el diseño se rompió.
 
 | | |
 |---|---|
-| **Hecho** | puertos, registro de adapters, config validada al arranque, adapters de métricas Prometheus y Cloud Eye con presupuesto, adapters de costo PromQL y BSS, adapter de modelo OpenAI-compatible, loop del agente, 9 tools de lectura (métricas, alertas y costo), auditoría, API con auth, métricas propias, imagen y compose; **detector de pico de gasto** con despachante (dedup, quiet hours, tope diario) y canales log, webhook y SMN |
+| **Hecho** | puertos, registro de adapters, config validada al arranque, adapters de métricas Prometheus y Cloud Eye con presupuesto, adapters de costo PromQL y BSS, adapter de modelo OpenAI-compatible, loop del agente, 10 tools de lectura (métricas, alertas y costo), `POST /v1/alerts` con el esquema de Alertmanager, enriquecimiento y triage, auditoría, API con auth, métricas propias, imagen y compose; **detector de pico de gasto** con despachante (dedup, quiet hours, tope diario) y canales log, webhook y SMN |
 | **F1** | el adapter de métricas contra Thanos/Mimir/VictoriaMetrics en CI, mTLS, SigV4 |
-| **F2** | `POST /v1/alerts` con el esquema de Alertmanager, enriquecimiento y triage |
+| **F2** | ruteo por severidad a canales distintos; persistir el registro de alertas |
 | **F3** | más canales: Slack con bloques, Teams, mail; persistir el estado del despachante |
 | **F5** | análisis declarativos en YAML |
 | **F6** | bot de Slack y Teams |
@@ -222,6 +254,9 @@ editar un `if` en el core para sumar uno, el diseño se rompió.
 ### El criterio de salida, verificado
 
 > docker run + un Prometheus de juguete → `/v1/chat` contesta cuántos targets están up.
+
+Y desde F0.4, además: un Alertmanager de juguete dispara sobre el target caído
+y la alerta llega por `/v1/alerts`, enriquecida con la regla y entregada.
 
 ```bash
 ./scripts/verify-f0.sh    # con MODEL_BASE_URL exportado, prueba el turno completo

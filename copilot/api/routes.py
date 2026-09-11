@@ -192,3 +192,37 @@ async def cost_spike_run(request: Request) -> dict[str, Any]:
     """Evalúa el detector ahora mismo y, si hay pico, lo despacha con la
     política normal (dedup incluido: correrlo dos veces no manda dos SMS)."""
     return await cost_spike.run_once(_rt(request))
+
+
+# --- Ingreso de alertas ----------------------------------------------------
+
+
+@router.post("/v1/alerts", status_code=202)
+async def alerts_receive(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
+    """El receiver del Alertmanager del cliente. Contesta enseguida qué encoló
+    y qué salteó (y por qué); el enriquecimiento y la entrega corren atrás.
+
+    En alertmanager.yml:
+
+        receivers:
+          - name: copilot
+            webhook_configs:
+              - url: http://copilot:8080/v1/alerts
+                http_config:
+                  authorization: {credentials: <COPILOT_API_TOKEN>}
+    """
+    return await _rt(request).ingress.receive(payload)
+
+
+@router.get("/v1/alerts")
+async def alerts_recent(request: Request, limit: int = 50, only_firing: bool = False,
+                        ) -> dict[str, Any]:
+    """Qué llegó, qué se decidió y qué dijo el triage. Buffer en memoria."""
+    rt = _rt(request)
+    return {
+        "pending": rt.ingress.pending,
+        "total": len(rt.alert_log),
+        "note": "Buffer en memoria: se pierde al reiniciar.",
+        "alerts": [r.as_dict() for r in rt.alert_log.recent(limit=min(limit, 500),
+                                                            only_firing=only_firing)],
+    }

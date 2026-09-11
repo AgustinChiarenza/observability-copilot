@@ -14,6 +14,7 @@ en rango para explicar el disparo, y sale de acá en vez de adivinarse.
 """
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from .registry import Context, tool
@@ -142,3 +143,48 @@ async def alert_rules(ctx: Context, contains: str = "", only_active: bool = Fals
     if len(listado) > _MAX_LISTED:
         salida["note"] = f"Se listan {_MAX_LISTED} de {len(listado)}. Acotá con `contains`."
     return salida
+
+
+@tool(
+    "alerts_received",
+    "Alertas que Alertmanager le mandó a este copiloto (ya pasadas por sus "
+    "silences e inhibición), con el triage que se hizo de cada una. Para "
+    "'qué pasó anoche', 'qué llegó en las últimas horas', 'qué se dijo de X'. "
+    "Es lo que SONÓ, a diferencia de alerts_active que es lo que el backend evalúa.",
+    {
+        "type": "object",
+        "properties": {
+            "hours": {"type": "number", "description": "Cuántas horas hacia atrás.", "default": 24},
+            "only_firing": {"type": "boolean", "default": False},
+            "contains": {"type": "string", "description": "Filtra por nombre."},
+        },
+    },
+)
+async def alerts_received(ctx: Context, hours: float = 24, only_firing: bool = False,
+                          contains: str = "") -> dict[str, Any]:
+    log = ctx.extras.get("alert_log")
+    if log is None:
+        raise RuntimeError("Esta instalación no recibe alertas de Alertmanager.")
+    desde = datetime.now(UTC) - timedelta(hours=max(0.1, hours))
+    filas = log.recent(limit=_MAX_LISTED, only_firing=only_firing, since=desde)
+    if contains:
+        aguja = contains.lower()
+        filas = [r for r in filas if aguja in r.signal.name.lower()]
+    return {
+        "hours": hours,
+        "count": len(filas),
+        "alerts": [
+            {
+                "name": r.signal.name, "status": str(r.signal.status),
+                "severity": r.signal.severity,
+                "labels": {k: v for k, v in r.signal.labels.items()
+                           if k not in ("alertname", "severity")},
+                "starts_at": r.signal.starts_at.isoformat(timespec="minutes"),
+                "received_at": r.received_at[:16],
+                "decision": r.decision,
+                **({"triage": r.enrichment["triage"]}
+                   if r.enrichment and r.enrichment.get("triage") else {}),
+            }
+            for r in filas
+        ],
+    }

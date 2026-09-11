@@ -1,0 +1,19 @@
+# Alertmanager de juguete: recibe lo que evalúa el Prometheus de al lado y se
+# lo manda al copiloto. En lo del cliente, este receiver se agrega al
+# alertmanager.yml que YA tienen; no se trae uno nuevo.
+route:
+  receiver: copilot
+  # Cortos para que la verificación tarde segundos. En producción se dejan
+  # los del cliente: son suyos y ya los ajustaron.
+  group_wait: 5s
+  group_interval: 10s
+  repeat_interval: 1h
+
+receivers:
+  - name: copilot
+    webhook_configs:
+      - url: http://copilot:8080/v1/alerts
+        send_resolved: true
+        http_config:
+          authorization:
+            credentials_file: /etc/alertmanager/token
