@@ -135,6 +135,15 @@ alerts:
   max_concurrent: 2       # enriquecimientos a la vez
   queue_max: 200          # más que esto en vuelo y se descarta con aviso
 
+# --- Persistencia: tres archivos, no una base --------------------------------
+# Auditoría (qué se consultó), alertas recibidas (qué sonó y qué se dijo) y el
+# estado del despachante (a quién se le avisó y cuántas veces hoy). Lo último
+# es lo que importa: sin esto, un reinicio a las 3 AM olvida el dedup y el tope
+# diario, y lo primero que hace el proceso nuevo es re-mandar todo. Vacío =
+# memoria sola, y /v1/status lo dice (`storage.durable: false`).
+storage:
+  path: ${COPILOT_STORAGE_PATH:-}     # p.ej. /var/lib/copilot, en un volumen
+
 # --- Detectores: lo que corre solo y avisa ---------------------------------
 # El LLM no participa: un número que dispara un SMS a las 4 de la mañana se
 # calcula en código, se testea y se explica en una línea.

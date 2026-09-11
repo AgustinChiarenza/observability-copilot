@@ -11,9 +11,11 @@ El orden importa por plata: decidir es gratis, enriquecer cuesta tokens. Una
 alerta que el despachante va a deduplicar no gasta un turno del agente para
 después descartarse.
 
-`AlertLog` es la memoria de lo que llegó y qué se hizo. Anillo en memoria,
-como la auditoría: es lo que lee `GET /v1/alerts`, la tool `alerts_received`
-y, en F6, el bot cuando alguien pregunta "¿qué pasó anoche?".
+`AlertLog` es la memoria de lo que llegó y qué se hizo. Anillo en memoria y,
+con `storage.path`, un JSONL al que se anexa cada alerta cuando termina de
+procesarse —no al llegar: se guarda con su decisión y su enriquecimiento, que
+es lo que vale releer—. Es lo que lee `GET /v1/alerts`, la tool
+`alerts_received` y, en F6, el bot cuando alguien pregunta "¿qué pasó anoche?".
 """
 from __future__ import annotations
 
@@ -28,6 +30,7 @@ from .. import telemetry
 from ..dispatch import Outcome
 from ..ports.alerts import Signal, SignalStatus
 from ..ports.notify import Message, Severity
+from ..store import Jsonl
 from . import alertmanager, enrich
 
 logger = logging.getLogger(__name__)
@@ -52,18 +55,57 @@ class Record:
             "severity": s.severity, "labels": s.labels, "summary": s.summary,
             "starts_at": s.starts_at.isoformat(),
             "ends_at": s.ends_at.isoformat() if s.ends_at else None,
+            "annotations": s.annotations, "source": s.source,
             "received_at": self.received_at, "finished_at": self.finished_at,
             "decision": self.decision, "enrichment": self.enrichment,
             "deliveries": self.deliveries,
         }
 
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> Record:
+        """El inverso de `as_dict`, para recargar del disco."""
+        ends = d.get("ends_at")
+        return cls(
+            signal=Signal(
+                fingerprint=str(d["fingerprint"]), name=str(d["name"]),
+                status=SignalStatus(d.get("status", "firing")),
+                starts_at=datetime.fromisoformat(d["starts_at"]),
+                labels=dict(d.get("labels") or {}),
+                annotations=dict(d.get("annotations") or {}),
+                ends_at=datetime.fromisoformat(ends) if ends else None,
+                source=str(d.get("source") or "alertmanager"),
+            ),
+            received_at=str(d["received_at"]),
+            decision=str(d.get("decision") or "pending"),
+            enrichment=d.get("enrichment"),
+            deliveries=list(d.get("deliveries") or []),
+            finished_at=str(d.get("finished_at") or ""),
+        )
+
 
 class AlertLog:
-    def __init__(self, maxlen: int = 1_000):
+    def __init__(self, maxlen: int = 1_000, store: Jsonl | None = None):
         self._items: deque[Record] = deque(maxlen=maxlen)
+        self._store = store
+        if store is not None:
+            for fila in store.tail(maxlen):
+                try:
+                    self._items.append(Record.from_dict(fila))
+                except (KeyError, ValueError, TypeError):
+                    continue   # una línea de otra versión
+
+    @property
+    def durable(self) -> bool:
+        return self._store is not None
 
     def add(self, r: Record) -> None:
         self._items.append(r)
+
+    def persist(self, r: Record) -> None:
+        """Se llama cuando la alerta terminó (decidida o entregada): eso es lo
+        que vale guardar. Sin store es un no-op."""
+        if self._store is not None:
+            self._store.append(r.as_dict())
 
     def recent(self, *, limit: int = 100, only_firing: bool = False,
                since: datetime | None = None) -> list[Record]:
@@ -144,6 +186,7 @@ class Ingress:
                 decision = "overloaded"
             if decision != "sent":
                 rec.decision, rec.finished_at = decision, ahora
+                self._log.persist(rec)
                 telemetry.ALERTS_PROCESSED.labels(decision=decision).inc()
                 salteadas.append({"fingerprint": s.fingerprint, "decision": decision})
                 continue
@@ -171,6 +214,7 @@ class Ingress:
             rec.deliveries = [{"channel": d.channel, "ok": d.ok, "detail": d.detail}
                               for d in out.deliveries]
             rec.finished_at = datetime.now(UTC).isoformat()
+            self._log.persist(rec)
             telemetry.ALERTS_PROCESSED.labels(decision=out.decision).inc()
             logger.info("alerts: %s %s → %s (%s)", s.status, s.name, out.decision,
                         ", ".join(f"{d.channel}:{'ok' if d.ok else 'FALLA'}"

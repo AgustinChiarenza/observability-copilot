@@ -35,6 +35,7 @@ from zoneinfo import ZoneInfo
 
 from . import telemetry
 from .ports.notify import Delivery, Message, NotifyPort, Severity
+from .store import State
 
 logger = logging.getLogger(__name__)
 
@@ -97,13 +98,49 @@ def _fit(m: Message, max_chars: int) -> Message:
 
 
 class Dispatcher:
-    def __init__(self, channels: list[NotifyPort], policy: Policy | None = None):
+    def __init__(self, channels: list[NotifyPort], policy: Policy | None = None,
+                 state: State | None = None):
         self.channels = list(channels)
         self.policy = policy or Policy()
         self._last_sent: dict[str, datetime] = {}
         self._sent_today: dict[tuple[str, date], int] = {}
         self._cap_notified: set[tuple[str, date]] = set()
         self.history: deque[Outcome] = deque(maxlen=500)
+        # El estado es la política que sobrevive al reinicio: sin él, el
+        # proceso nuevo no sabe a quién le avisó el viejo ni cuántas veces hoy.
+        self._state = state
+        if state is not None:
+            self._restore(state.load())
+
+    # --- estado en disco ----------------------------------------------------
+
+    def _restore(self, d: dict[str, Any]) -> None:
+        try:
+            self._last_sent = {str(k): datetime.fromisoformat(v)
+                               for k, v in (d.get("last_sent") or {}).items()}
+            self._sent_today = {(str(c), date.fromisoformat(f)): int(n)
+                                for c, f, n in (d.get("sent_today") or [])}
+            self._cap_notified = {(str(c), date.fromisoformat(f))
+                                  for c, f in (d.get("cap_notified") or [])}
+        except (ValueError, TypeError) as e:
+            logger.warning("dispatch: estado ilegible, se arranca vacío (%s)", e)
+            self._last_sent, self._sent_today, self._cap_notified = {}, {}, set()
+
+    def _snapshot(self, now: datetime) -> None:
+        if self._state is None:
+            return
+        hoy = now.date()
+        # Lo de ayer no cuenta para el tope de hoy, y un fingerprint que ya
+        # pasó el repeat_interval no deduplica nada: se podan al guardar.
+        self._sent_today = {k: v for k, v in self._sent_today.items() if k[1] == hoy}
+        self._cap_notified = {k for k in self._cap_notified if k[1] == hoy}
+        self._last_sent = {k: v for k, v in self._last_sent.items()
+                           if now - v < self.policy.repeat_interval}
+        self._state.save({
+            "last_sent": {k: v.isoformat() for k, v in self._last_sent.items()},
+            "sent_today": [[c, f.isoformat(), n] for (c, f), n in self._sent_today.items()],
+            "cap_notified": [[c, f.isoformat()] for c, f in self._cap_notified],
+        })
 
     # --- política -----------------------------------------------------------
 
@@ -142,6 +179,7 @@ class Dispatcher:
                     self._last_sent.pop(m.fingerprint, None)
                 else:
                     self._last_sent[m.fingerprint] = now
+            self._snapshot(now)   # también si quedó "capped": cambió el contador
 
         telemetry.NOTIFY_OUTCOMES.labels(decision=out.decision).inc()
         if out.decision != "sent":
@@ -199,5 +237,6 @@ class Dispatcher:
             },
             "sent_today": {c.name: self._sent_today.get((c.name, hoy), 0)
                            for c in self.channels},
+            "durable": self._state is not None,
             "recent": [o.as_dict() for o in list(self.history)[-20:]],
         }

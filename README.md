@@ -199,6 +199,17 @@ campo — mejor eso que un 401 raro tres horas después.
 Ver [`config/copilot.example.yaml`](config/copilot.example.yaml), que está
 comentado entero.
 
+### Lo que se persiste, y por qué tan poco
+
+No hay base de datos. Con `storage.path` apuntando a un volumen, quedan tres
+archivos: la auditoría (qué se consultó), las alertas recibidas (qué sonó y qué
+se dijo de cada una) y el estado del despachante. El último es el que importa:
+sin él, un reinicio a las 3 AM olvida el dedup y el tope diario, y lo primero que
+hace el proceso nuevo es re-mandar lo que el viejo ya había frenado. El compose
+monta ese volumen; el contenedor sigue siendo read-only fuera de él. Sin
+`storage.path` todo queda en memoria y `/v1/status` lo dice
+(`storage.durable: false`).
+
 ### El presupuesto no es opcional
 
 ```yaml
@@ -226,6 +237,7 @@ copilot/
   alerts/       el webhook de Alertmanager → decidir → enriquecer → entregar.
   detectors/    lo que corre solo y avisa. Hoy: pico de gasto.
   dispatch.py   la política de entrega, una para todos los canales.
+  store.py      JSONL y un JSON en un volumen: lo poco que sobrevive al reinicio.
   api/          FastAPI: /v1/chat, /v1/alerts, /v1/notify, /v1/status, /v1/tools, /v1/audit, salud.
   telemetry/    las métricas del propio copiloto, en /metrics.
 ```
@@ -243,10 +255,10 @@ editar un `if` en el core para sumar uno, el diseño se rompió.
 
 | | |
 |---|---|
-| **Hecho** | puertos, registro de adapters, config validada al arranque, adapters de métricas Prometheus y Cloud Eye con presupuesto, adapters de costo PromQL y BSS, adapter de modelo OpenAI-compatible, loop del agente, 10 tools de lectura (métricas, alertas y costo), `POST /v1/alerts` con el esquema de Alertmanager, enriquecimiento y triage, auditoría, API con auth, métricas propias, imagen y compose; **detector de pico de gasto** con despachante (dedup, quiet hours, tope diario) y canales log, webhook y SMN |
+| **Hecho** | puertos, registro de adapters, config validada al arranque, adapters de métricas Prometheus y Cloud Eye con presupuesto, adapters de costo PromQL y BSS, adapter de modelo OpenAI-compatible, loop del agente, 11 tools de lectura (métricas con su metadata, alertas y costo), `POST /v1/alerts` con el esquema de Alertmanager, enriquecimiento y triage, auditoría, alertas y estado del despachante persistidos en un volumen, API con auth, métricas propias, imagen y compose; **detector de pico de gasto** con despachante (dedup, quiet hours, tope diario) y canales log, webhook y SMN |
 | **F1** | el adapter de métricas contra Thanos/Mimir/VictoriaMetrics en CI, mTLS, SigV4 |
-| **F2** | ruteo por severidad a canales distintos; persistir el registro de alertas |
-| **F3** | más canales: Slack con bloques, Teams, mail; persistir el estado del despachante |
+| **F2** | ruteo por severidad a canales distintos |
+| **F3** | más canales: Slack con bloques, Teams, mail |
 | **F5** | análisis declarativos en YAML |
 | **F6** | bot de Slack y Teams |
 | **F7** | Helm, NetworkPolicy, SBOM, política IAM read-only, guía de instalación |

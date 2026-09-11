@@ -133,6 +133,28 @@ echo "$salida" | grep -q '"decision": *"sent"' || fail "la alerta no se entregó
 echo "$salida" | grep -q '"expression": *"up == 0"' || fail "no se enriqueció con la regla: $salida"
 ok "Alertmanager real → /v1/alerts: recibida, enriquecida con la regla y entregada"
 
+# La persistencia, contra el volumen real y el contenedor read-only: lo que
+# llegó tiene que seguir estando después de reiniciar el proceso, y el
+# despachante tiene que acordarse de que ya avisó.
+curl -sf -H "Authorization: Bearer $TOKEN" ${APP}/v1/status \
+  | grep -q '"durable": *true' || fail "/v1/status no reporta storage durable"
+docker compose restart copilot >/dev/null
+for _ in $(seq 1 30); do
+  curl -sf ${APP}/healthz >/dev/null 2>&1 && break
+  sleep 1
+done
+salida=$(curl -sf -H "Authorization: Bearer $TOKEN" "${APP}/v1/alerts?limit=5")
+echo "$salida" | grep -q '"name": *"TargetCaido"' || fail "la alerta no sobrevivió al reinicio: $salida"
+salida=$(curl -sf -H "Authorization: Bearer $TOKEN" "${APP}/v1/notify")
+echo "$salida" | grep -q '"ops": *1' || fail "el despachante olvidó lo que mandó: $salida"
+ok "tras reiniciar, la alerta sigue en /v1/alerts y el despachante recuerda el envío"
+
+salida=$(docker compose exec -T copilot python -m copilot tool \
+  metric_metadata '{"contains":"prometheus_http"}')
+echo "$salida" | grep -q '"type": "counter"' || fail "metric_metadata no trajo el tipo: $salida"
+echo "$salida" | grep -q '"help": ' || fail "metric_metadata no trajo el help: $salida"
+ok "metric_metadata lee tipo y help del Prometheus real"
+
 # El "¿llega?" de la instalación: un mensaje de prueba por cada canal,
 # salteando dedup, quiet hours y tope. Acá el canal es el log.
 salida=$(docker compose exec -T copilot python -m copilot notify-test)

@@ -135,6 +135,19 @@ class Rule:
 
 
 @dataclass(frozen=True)
+class Metadata:
+    """Qué es una métrica: tipo, unidad y el `help` que escribió quien la
+    expone. Es lo que separa "node_cpu_seconds_total" de "un contador de
+    segundos de CPU por modo": con esto el modelo sabe que hay que hacerle
+    `rate()` antes de sumarlo."""
+
+    name: str
+    type: str = "unknown"     # "counter" | "gauge" | "histogram" | "summary" | "unknown"
+    help: str = ""
+    unit: str = ""
+
+
+@dataclass(frozen=True)
 class Target:
     """Un target de scrape, como lo reporta el backend."""
 
@@ -190,6 +203,12 @@ class MetricsPort(Protocol):
 
     async def targets(self) -> list[Target]:
         """Targets de scrape con su salud."""
+        ...
+
+    async def metadata(self, *, contains: str = "", limit: int = 100) -> list[Metadata]:
+        """Tipo, unidad y `help` de las métricas cuyo nombre contiene
+        `contains`. Es lo que el agente lee para no aplicarle `rate()` a un
+        gauge ni sumar un histograma como si fuera un contador."""
         ...
 
     async def alerts(self) -> list[Alert]:

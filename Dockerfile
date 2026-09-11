@@ -21,7 +21,11 @@ FROM python:3.12-slim
 # Usuario sin privilegios y sin shell. Muchos clusters tienen una PodSecurity
 # que rechaza contenedores que corren como root, y descubrirlo en la
 # instalación es perder la mañana.
-RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin copilot
+RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin copilot \
+    # El directorio de datos existe en la imagen y es del usuario: un volumen
+    # que se monte ahí hereda ese dueño, en vez de aparecer como root y dejar
+    # al proceso sin poder escribir su propia auditoría.
+    && mkdir -p /var/lib/copilot && chown 10001:10001 /var/lib/copilot
 
 COPY --from=build /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH" \

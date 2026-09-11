@@ -22,17 +22,22 @@ services:
       MODEL_NAME: ${MODEL_NAME:-sin-modelo}
       COPILOT_LOG_FORMAT: ${COPILOT_LOG_FORMAT:-text}
       COPILOT_LOG_LEVEL: ${COPILOT_LOG_LEVEL:-INFO}
+      COPILOT_STORAGE_PATH: /var/lib/copilot
     volumes:
       - ./config/copilot.example.yaml:/etc/copilot/copilot.yaml:ro
+      # Lo único que escribe: auditoría, alertas recibidas y el estado del
+      # despachante (dedup y tope diario), para que un reinicio no re-mande lo
+      # que el proceso anterior ya había frenado.
+      - copilot-data:/var/lib/copilot
     ports:
       # Configurables porque en una máquina de desarrollo casi siempre hay otro
       # stack con Prometheus en 9090. Adentro de la red del compose los puertos
       # no cambian nunca.
       - "${COPILOT_HOST_PORT:-8080}:8080"
     restart: unless-stopped
-    # Read-only es también una afirmación sobre el producto: no escribe nada en
-    # disco, así que el filesystem puede montarse de sólo lectura y eso queda
-    # demostrado en cada arranque, no prometido en un PDF.
+    # Read-only es también una afirmación sobre el producto: fuera del volumen
+    # de datos no escribe nada, así que el filesystem puede montarse de sólo
+    # lectura y eso queda demostrado en cada arranque, no prometido en un PDF.
     read_only: true
     tmpfs:
       - /tmp
@@ -64,3 +69,6 @@ services:
       # de entorno en su config, y así el secreto no queda en el YAML.
       - ./deploy/alertmanager/token:/etc/alertmanager/token:ro
     restart: unless-stopped
+
+volumes:
+  copilot-data:

@@ -210,3 +210,35 @@ async def targets_health(ctx: Context, only_down: bool = False) -> dict[str, Any
             for t in listado[:100]
         ],
     }
+
+
+@tool(
+    "metric_metadata",
+    "Tipo (counter, gauge, histogram, summary), unidad y descripción de las "
+    "métricas cuyo nombre contiene un texto. Para saber qué es una métrica "
+    "antes de usarla: a un counter se le hace rate(), a un gauge no.",
+    {
+        "type": "object",
+        "properties": {
+            "contains": {
+                "type": "string",
+                "description": "Substring del nombre. Vacío lista las primeras.",
+                "default": "",
+            },
+            "limit": {"type": "integer", "default": 50, "minimum": 1, "maximum": 200},
+        },
+    },
+)
+async def metric_metadata(ctx: Context, contains: str = "", limit: int = 50) -> dict[str, Any]:
+    limite = max(1, min(int(limit), 200))
+    fichas = await _need_metrics(ctx).metadata(contains=contains, limit=limite + 1)
+    return {
+        "count": min(len(fichas), limite),
+        "truncated": len(fichas) > limite,
+        "metrics": [
+            {"name": m.name, "type": m.type,
+             **({"unit": m.unit} if m.unit else {}),
+             **({"help": m.help} if m.help else {})}
+            for m in fichas[:limite]
+        ],
+    }

@@ -30,6 +30,7 @@ class FakePrometheus:
     labels: dict[str, list[str]] = field(default_factory=dict)
     alerts: list[dict] = field(default_factory=list)
     rule_groups: list[dict] = field(default_factory=list)
+    metadata: dict[str, list[dict]] = field(default_factory=dict)
     calls: list[tuple[str, dict]] = field(default_factory=list)
     fail_with: int | None = None
 
@@ -68,6 +69,9 @@ class FakePrometheus:
 
         if path == "/api/v1/rules":
             return self._ok({"groups": self.rule_groups})
+
+        if path == "/api/v1/metadata":
+            return self._ok(self.metadata)
 
         return httpx.Response(404, json={"status": "error", "error": f"sin ruta: {path}"})
 

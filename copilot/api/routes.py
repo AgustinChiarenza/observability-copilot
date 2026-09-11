@@ -74,6 +74,10 @@ async def status(request: Request) -> dict[str, Any]:
                 "window_days": rt.config.detectors.cost_spike.window_days,
             },
         },
+        "storage": {
+            "durable": rt.storage.durable,
+            "path": str(rt.storage.root) if rt.storage.root else None,
+        },
     }
 
 

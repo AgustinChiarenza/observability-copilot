@@ -9,10 +9,10 @@ Se registran los argumentos completos —la query PromQL tal cual salió— pero
 sería hacer una copia de sus métricas en un buffer que nadie pidió. Queda el
 tamaño y si salió bien, que es lo que hace falta para auditar.
 
-Buffer en memoria y anillo: F0 no tiene base de datos y no la va a inventar
-para esto. Persistir es de F7, junto con el resto de lo que hace falta para que
-esto sea instalable. Que sea en memoria está dicho en `/v1/audit` para que nadie
-lo confunda con un registro durable.
+Anillo en memoria, y si la instalación configuró `storage.path`, cada entrada
+se anexa también a un JSONL y las últimas se recargan al arrancar. Sin eso
+queda en memoria, y `/v1/audit` lo dice (`durable: false`) para que nadie lo
+confunda con un registro durable.
 """
 from __future__ import annotations
 
@@ -21,6 +21,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from threading import Lock
 from typing import Any
+
+from ..store import Jsonl
 
 MAX_ENTRIES = 1_000
 
@@ -41,6 +43,25 @@ class Entry:
 
 _entries: deque[Entry] = deque(maxlen=MAX_ENTRIES)
 _lock = Lock()
+_store: Jsonl | None = None
+
+
+def attach(store: Jsonl | None) -> int:
+    """Engancha el archivo y recarga lo que había. Devuelve cuántas entradas
+    recuperó. Con `None` vuelve a memoria sola."""
+    global _store
+    with _lock:
+        _entries.clear()
+        _store = store
+        if store is None:
+            return 0
+        campos = {f for f in Entry.__dataclass_fields__}
+        for fila in store.tail(MAX_ENTRIES):
+            try:
+                _entries.append(Entry(**{k: v for k, v in fila.items() if k in campos}))
+            except TypeError:
+                continue   # una línea de otra versión; se saltea, no se rompe
+        return len(_entries)
 
 
 def record(
@@ -61,6 +82,9 @@ def record(
     )
     with _lock:
         _entries.append(e)
+        store = _store
+    if store is not None:
+        store.append(asdict(e))
     return e
 
 
@@ -89,10 +113,12 @@ def summary() -> dict[str, Any]:
         "by_tool": dict(sorted(por_tool.items(), key=lambda kv: -kv[1])),
         "oldest": filas[0].ts if filas else None,
         "newest": filas[-1].ts if filas else None,
-        "durable": False,
+        "durable": _store is not None,
     }
 
 
 def reset() -> None:
+    global _store
     with _lock:
         _entries.clear()
+        _store = None

@@ -193,6 +193,18 @@ def _parse_detectors(raw: dict[str, Any]) -> DetectorsConfig:
     ))
 
 
+@dataclass(frozen=True)
+class StorageConfig:
+    """Dónde persistir lo poco que hace falta persistir. Vacío = memoria.
+
+    No es una base: son tres archivos en un volumen (auditoría, alertas
+    recibidas, estado del despachante). Sin esto un reinicio olvida el dedup y
+    el tope diario, y lo primero que hace el proceso nuevo es re-mandar lo que
+    el viejo ya había frenado."""
+
+    path: str = ""
+
+
 @dataclass
 class Config:
     server: ServerConfig = field(default_factory=ServerConfig)
@@ -205,6 +217,7 @@ class Config:
     dispatch: Policy = field(default_factory=Policy)
     detectors: DetectorsConfig = field(default_factory=DetectorsConfig)
     alerts: EnrichConfig = field(default_factory=EnrichConfig)
+    storage: StorageConfig = field(default_factory=StorageConfig)
     source_path: str = ""
 
     @classmethod
@@ -258,6 +271,7 @@ class Config:
             dispatch=_parse_dispatch(raw.get("dispatch") or {}),
             detectors=_parse_detectors(raw.get("detectors") or {}),
             alerts=_parse_alerts(raw.get("alerts") or {}),
+            storage=StorageConfig(path=str((raw.get("storage") or {}).get("path", "") or "")),
             source_path=source_path,
         )
 

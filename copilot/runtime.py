@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from . import adapters
+from .agent import audit
 from .agent.registry import Context
 from .alerts.ingress import AlertLog, Ingress
 from .config import Config
@@ -29,6 +30,7 @@ from .ports.cost import CostPort
 from .ports.metrics import MetricsPort
 from .ports.model import ModelPort
 from .ports.notify import NotifyPort
+from .store import Storage
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,7 @@ class Runtime:
     notify: list[NotifyPort] = field(default_factory=list)
     dispatcher: Dispatcher = field(default_factory=lambda: Dispatcher([]))
     alert_log: AlertLog = field(default_factory=AlertLog)
+    storage: Storage = field(default_factory=lambda: Storage(None))
     _ingress: Ingress | None = field(default=None, repr=False)
 
     def context(self) -> Context:
@@ -125,8 +128,21 @@ def build(config: Config) -> Runtime:
             "notify: no hay canales configurados; las notificaciones van al log.")
         rt.notify.append(adapters.build("notify", "log", {}, name="log"))
 
+    # Lo poco que se persiste, si hay dónde. Se engancha antes del despachante
+    # para que arranque sabiendo a quién le avisó el proceso anterior.
+    rt.storage = Storage(config.storage.path or None)
+    if rt.storage.durable:
+        recuperadas = audit.attach(rt.storage.jsonl("audit"))
+        rt.alert_log = AlertLog(store=rt.storage.jsonl("alerts"))
+        logger.info("storage: %s (auditoría: %d entradas, alertas: %d)",
+                    rt.storage.root, recuperadas, len(rt.alert_log))
+    else:
+        audit.attach(None)
+        logger.warning("storage.path no configurado: auditoría, alertas y estado "
+                       "del despachante quedan en memoria y se pierden al reiniciar.")
+
     # La política es una para todos los canales; por eso vive acá y no en ellos.
-    rt.dispatcher = Dispatcher(rt.notify, config.dispatch)
+    rt.dispatcher = Dispatcher(rt.notify, config.dispatch, state=rt.storage.state("dispatch"))
 
     logger.info("runtime armado: %s", rt.describe())
     return rt

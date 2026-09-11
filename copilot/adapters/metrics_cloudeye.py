@@ -41,6 +41,7 @@ from ..ports.metrics import (
     Alert,
     Budget,
     Instant,
+    Metadata,
     MetricsError,
     Range,
     Rule,
@@ -310,6 +311,20 @@ class CloudEyeMetrics:
         else:
             valores = {m["dims"][etiqueta] for m in meta if etiqueta in m["dims"]}
         return sorted(valores)[: self.budget.max_series]
+
+    async def metadata(self, *, contains: str = "", limit: int = 100) -> list[Metadata]:
+        # CES no tiene `help` ni tipo: todo es un gauge ya muestreado (los
+        # contadores vienen como tasa por período). La unidad sí la manda, y es
+        # lo que más sirve: `%` vs `byte/s` vs `count` cambia la respuesta.
+        aguja = (contains or "").strip().lower()
+        vistos: dict[str, str] = {}
+        for m in await self._metrics_meta():
+            nombre = f"{m['namespace']}/{m['metric']}"
+            if aguja and aguja not in nombre.lower():
+                continue
+            vistos.setdefault(nombre, m["unit"])
+        return [Metadata(name=n, type="gauge", unit=u)
+                for n, u in sorted(vistos.items())[: max(1, limit)]]
 
     async def targets(self) -> list[Target]:
         raise MetricsError(

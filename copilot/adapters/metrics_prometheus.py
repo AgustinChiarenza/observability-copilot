@@ -32,6 +32,7 @@ from ..ports.metrics import (
     Alert,
     Budget,
     Instant,
+    Metadata,
     MetricsError,
     Range,
     Rule,
@@ -256,6 +257,27 @@ class PrometheusMetrics:
         data = await self._get(f"/api/v1/label/{etiqueta}/values", params)
         valores = data if isinstance(data, list) else []
         return [str(v) for v in valores[: self.budget.max_series]]
+
+    async def metadata(self, *, contains: str = "", limit: int = 100) -> list[Metadata]:
+        # /api/v1/metadata filtra por nombre exacto (`metric=`), no por
+        # substring; se pide todo y se filtra acá. Son unos KB por métrica
+        # expuesta, y la lista es la misma en todo el turno.
+        data = await self._get("/api/v1/metadata", {})
+        aguja = (contains or "").strip().lower()
+        salida: list[Metadata] = []
+        for nombre in sorted((data or {}).keys()):
+            if aguja and aguja not in nombre.lower():
+                continue
+            # Un mismo nombre puede venir con metadata distinta de dos targets;
+            # se toma la primera, es lo que hace la UI de Prometheus también.
+            fichas = data[nombre] or [{}]
+            m = fichas[0]
+            salida.append(Metadata(
+                name=nombre, type=str(m.get("type") or "unknown"),
+                help=str(m.get("help") or "")[:300], unit=str(m.get("unit") or "")))
+            if len(salida) >= max(1, limit):
+                break
+        return salida
 
     async def targets(self) -> list[Target]:
         data = await self._get("/api/v1/targets", {"state": "active"})

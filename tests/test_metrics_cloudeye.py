@@ -204,3 +204,10 @@ async def test_el_prompt_del_sistema_lleva_la_sintaxis(config, port, model):
 def test_sin_credenciales_dice_que_permisos_hacen_falta():
     with pytest.raises(ValueError, match="ces:metricData:list"):
         CloudEyeMetrics(region="la-south-2")
+
+
+async def test_metadata_es_todo_gauge_con_la_unidad_de_ces(port):
+    fichas = await port.metadata(contains="cpu")
+    assert [(m.name, m.type, m.unit) for m in fichas] == [
+        ("SYS.ECS/cpu_util", "gauge", "%"), ("SYS.RDS/rds001_cpu_util", "gauge", "%")]
+    assert len(await port.metadata(limit=1)) == 1
