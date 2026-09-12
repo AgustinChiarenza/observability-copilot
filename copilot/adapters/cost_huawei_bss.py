@@ -116,7 +116,7 @@ class HuaweiBssCost:
         except ImportError as e:
             raise ValueError(
                 "El adapter huawei_bss necesita el SDK de Huawei: "
-                "pip install 'pcnt-copilot[huawei]'") from e
+                "pip install 'observability-copilot[huawei]'") from e
         # BSS es un servicio global: credencial global, y la región es la del
         # endpoint de facturación, no la de los recursos.
         b = Client.new_builder().with_credentials(GlobalCredentials(ak, sk))

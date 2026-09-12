@@ -1,5 +1,5 @@
 [project]
-name = "pcnt-copilot"
+name = "observability-copilot"
 version = "0.1.0"
 description = "Addon de observabilidad: lee las métricas, alertas y costos que el cliente ya tiene."
 requires-python = ">=3.11"

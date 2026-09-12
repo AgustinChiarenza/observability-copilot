@@ -127,7 +127,7 @@ evalúa antes de silences. "¿Qué pasó anoche?" se contesta con la primera.
 ## Si el cliente está en Huawei Cloud
 
 "Lo del Cloud Eye y el BSS el cliente ya lo tiene": dos adapters, cero
-cambios en el core, y el SDK sólo entra si se pide (`pcnt-copilot[huawei]` o
+cambios en el core, y el SDK sólo entra si se pide (`observability-copilot[huawei]` o
 `--build-arg EXTRAS=huawei`).
 
 - **`metrics: cloudeye`** — Cloud Eye no habla PromQL y el adapter no lo
@@ -176,7 +176,7 @@ una madrugada".
 
 Canales: `log`, `webhook` (Slack, Teams, lo que reciba JSON) y `smn` de Huawei
 (SMS, mail o HTTP, lo que tenga suscripto el topic). SMN es la primera pieza
-con SDK propio y por eso es un extra: `pip install pcnt-copilot[huawei]`, o la
+con SDK propio y por eso es un extra: `pip install observability-copilot[huawei]`, o la
 imagen con `--build-arg EXTRAS=huawei`. La imagen genérica no lo lleva.
 
 Antes de irte de lo del cliente:

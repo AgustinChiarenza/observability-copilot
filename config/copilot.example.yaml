@@ -29,7 +29,7 @@ metrics:
 
 # Si las métricas están en Cloud Eye y no en un Prometheus. No habla PromQL:
 # `query` es un selector NAMESPACE/metric{dim="valor"} y el agente lo aprende
-# del prompt. Necesita `pip install pcnt-copilot[huawei]` o la imagen con
+# del prompt. Necesita `pip install observability-copilot[huawei]` o la imagen con
 # --build-arg EXTRAS=huawei. Permisos: ces:metricData:list, ces:metrics:list,
 # ces:alarms:list — lectura, nada más.
 # metrics:
@@ -101,7 +101,7 @@ notify:
   #   url: ${SLACK_WEBHOOK_URL}
   #   template: slack
   # SMN de Huawei: un topic, y atrás lo que el cliente haya suscripto (SMS,
-  # mail, HTTP). Necesita `pip install pcnt-copilot[huawei]` o la imagen
+  # mail, HTTP). Necesita `pip install observability-copilot[huawei]` o la imagen
   # construida con --build-arg EXTRAS=huawei.
   # - name: guardia
   #   adapter: smn

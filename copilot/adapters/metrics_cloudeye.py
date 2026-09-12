@@ -148,7 +148,7 @@ class CloudEyeMetrics:
             from huaweicloudsdkcore.auth.credentials import BasicCredentials
         except ImportError as e:
             raise ValueError("El adapter cloudeye necesita el SDK de Huawei: "
-                             "pip install 'pcnt-copilot[huawei]'") from e
+                             "pip install 'observability-copilot[huawei]'") from e
         cred = BasicCredentials(ak, sk, project_id)
 
         def armar(cls):

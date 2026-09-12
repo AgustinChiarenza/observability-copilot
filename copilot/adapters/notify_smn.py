@@ -4,7 +4,7 @@
 Es el primer canal con SDK propio, y por eso importa cómo está hecho:
 
   - el SDK se importa adentro del constructor, no arriba. Es una dependencia
-    opcional (`pip install pcnt-copilot[huawei]`) y un cliente sin Huawei no
+    opcional (`pip install observability-copilot[huawei]`) y un cliente sin Huawei no
     tiene por qué instalarla. Si falta, el error lo dice con el comando.
   - `max_chars` por defecto es 400 y no 4.000: un topic con suscriptores SMS
     recorta a ~490 bytes y un mensaje largo se corta a mitad de la frase que
@@ -66,7 +66,7 @@ class SmnNotifier:
         except ImportError as e:
             raise ValueError(
                 "El canal smn necesita el SDK de Huawei: "
-                "pip install 'pcnt-copilot[huawei]'") from e
+                "pip install 'observability-copilot[huawei]'") from e
         cred = BasicCredentials(ak, sk, project_id)
         b = SmnClient.new_builder().with_credentials(cred)
         if endpoint:
