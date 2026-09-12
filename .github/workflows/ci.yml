@@ -1,0 +1,52 @@
+# Lo mismo que se corre a mano antes de un commit, más lo que necesita una
+# máquina limpia para demostrar: que la imagen se construye en sus dos
+# variantes y qué lleva adentro (el SBOM queda como artefacto del run).
+name: ci
+on:
+  push: {branches: [main]}
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.14"}
+      - run: pip install -e ".[dev]"
+      - run: ruff check copilot tests
+      - run: pytest -q
+
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.14"}
+      - uses: azure/setup-helm@v4
+      - run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz \
+            | sudo tar -xz -C /usr/local/bin kubeconform
+      - run: pip install -e .
+      - run: PY=python ./scripts/verify-helm.sh
+
+  image:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        extras: ["", "huawei"]
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --build-arg "EXTRAS=${{ matrix.extras }}" -t copilot:ci .
+      - run: docker run --rm --entrypoint python copilot:ci -c "import copilot.adapters"
+      - uses: anchore/sbom-action@v0
+        with:
+          image: copilot:ci
+          format: cyclonedx-json
+          artifact-name: sbom${{ matrix.extras && '-' || '' }}${{ matrix.extras }}.cdx.json
+      - uses: anchore/scan-action@v6
+        with:
+          image: copilot:ci
+          fail-build: true
+          severity-cutoff: high
+          only-fixed: true

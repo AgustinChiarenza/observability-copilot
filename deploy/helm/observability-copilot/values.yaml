@@ -1,0 +1,143 @@
+# Valores del chart. Lo que hay que tocar sí o sí está marcado con REQUERIDO;
+# el resto tiene defaults que sirven para una instalación normal.
+
+image:
+  repository: ghcr.io/agustinchiarenza/observability-copilot   # REQUERIDO: la imagen que construiste
+  tag: ""                       # vacío = appVersion del chart
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# Un solo pod: el estado del despachante (dedup, tope diario) vive en un PVC
+# RWO y dos réplicas se pisarían. Escalar horizontalmente no es lo que hace
+# falta acá — el cuello es el modelo, no el copiloto.
+replicaCount: 1
+
+# --- Config ------------------------------------------------------------------
+# El copilot.yaml entero, tal cual iría en config/copilot.yaml. Los secretos NO
+# van acá: se escriben como ${VAR} y salen del Secret de abajo.
+config:
+  server:
+    api_token: ${COPILOT_API_TOKEN}
+  metrics:
+    adapter: prometheus
+    url: ${PROMETHEUS_URL}          # REQUERIDO (ver `env` abajo)
+  model:
+    adapter: openai_compat
+    base_url: ${MODEL_BASE_URL}     # REQUERIDO
+    api_key: ${MODEL_API_KEY:-}
+    model: ${MODEL_NAME}
+  notify:
+    - name: ops
+      adapter: log
+  dispatch:
+    repeat_interval: 4h
+    daily_cap: 50
+  alerts:
+    triage: true
+  detectors:
+    cost_spike:
+      enabled: false
+  storage:
+    path: ${COPILOT_STORAGE_PATH:-}   # lo setea el chart según persistence.enabled
+
+# Variables de entorno que NO son secretas (URLs, nombres). Se referencian
+# desde `config` con ${VAR}.
+env:
+  PROMETHEUS_URL: ""              # REQUERIDO, p.ej. http://prometheus-operated.monitoring.svc:9090
+  MODEL_BASE_URL: ""              # REQUERIDO, p.ej. http://vllm.ml.svc:8000/v1
+  MODEL_NAME: ""
+  COPILOT_LOG_FORMAT: json
+  COPILOT_LOG_LEVEL: INFO
+
+# --- Secretos -----------------------------------------------------------------
+# Un Secret que ya existe, con las variables que la config referencia:
+# COPILOT_API_TOKEN, MODEL_API_KEY y, si aplica, HW_AK / HW_SK / SMN_TOPIC_URN.
+# Se monta entero como entorno. Crearlo antes:
+#   kubectl create secret generic copilot-secrets \
+#     --from-literal=COPILOT_API_TOKEN="$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')" \
+#     --from-literal=MODEL_API_KEY=...
+existingSecret: ""              # REQUERIDO
+
+# --- Persistencia ---------------------------------------------------------------
+# Auditoría, alertas recibidas y el estado del despachante. Chico: 1Gi sobra.
+persistence:
+  enabled: true
+  size: 1Gi
+  storageClass: ""              # vacío = la default del cluster
+  accessModes: [ReadWriteOnce]
+  existingClaim: ""
+
+# --- Red -------------------------------------------------------------------------
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: copilot.example.internal
+      paths: [{path: /, pathType: Prefix}]
+  tls: []
+
+# Default-deny con lo justo abierto. Los selectores son del cluster del
+# cliente; sin ellos la policy sólo abre DNS y hay que ajustarla o apagarla.
+networkPolicy:
+  enabled: true
+  # Quién puede llamar a la API (Alertmanager para /v1/alerts, y quien haga
+  # preguntas). Lista de `from` como en NetworkPolicy.
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: monitoring}
+  # A dónde puede salir, además de DNS. Lista de reglas `egress`.
+  egressTo:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: monitoring}
+      ports: [{port: 9090, protocol: TCP}]
+  # Si el modelo o la API de Huawei están fuera del cluster: abrir 443 hacia
+  # afuera (sin selector = cualquier IP). Apagado por defecto a propósito.
+  allowExternalHttps: false
+
+# --- Observabilidad del propio copiloto -------------------------------------------
+serviceMonitor:
+  enabled: false                # necesita el CRD del prometheus-operator
+  interval: 30s
+  labels: {}
+prometheusRule:
+  enabled: false                # necesita el CRD del prometheus-operator
+  labels: {}
+
+# --- Pod ----------------------------------------------------------------------------
+resources:
+  requests: {cpu: 100m, memory: 128Mi}
+  limits: {cpu: "1", memory: 512Mi}
+
+# Sin shell, sin root, sin escritura fuera del volumen, sin capabilities. Un
+# cluster con PodSecurity `restricted` lo acepta tal cual.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile: {type: RuntimeDefault}
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: {drop: [ALL]}
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+priorityClassName: ""
+extraEnv: []                    # [{name: X, value: y}] o con valueFrom
+extraVolumes: []
+extraVolumeMounts: []

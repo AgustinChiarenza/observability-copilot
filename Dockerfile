@@ -1,7 +1,7 @@
 # Build en dos etapas: la imagen final no lleva compilador ni cabeceras de
 # desarrollo. Va a correr en el cluster de un cliente, y todo lo que sobra es
 # superficie que su escáner de vulnerabilidades le va a marcar a él, no a vos.
-FROM python:3.12-slim AS build
+FROM python:3.14-slim AS build
 
 WORKDIR /build
 RUN python -m venv /opt/venv
@@ -13,15 +13,25 @@ COPY copilot ./copilot
 # imagen genérica no lleva el SDK de Huawei, y la de un cliente Huawei se
 # construye con --build-arg EXTRAS=huawei.
 ARG EXTRAS=""
-RUN pip install --no-cache-dir ".${EXTRAS:+[$EXTRAS]}"
+# pip no viaja a la imagen final: nada se instala en runtime, y un pip viejo
+# es una línea más en el escaneo de vulnerabilidades del cliente.
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir ".${EXTRAS:+[$EXTRAS]}" \
+    && pip uninstall -y pip setuptools wheel >/dev/null 2>&1 || true
 
 # --- runtime ---------------------------------------------------------------
-FROM python:3.12-slim
+FROM python:3.14-slim
+
+# El pip del sistema tampoco hace falta, y el escáner lo ve igual.
+RUN rm -rf /usr/local/lib/python3.14/site-packages/pip* \
+           /usr/local/lib/python3.14/site-packages/setuptools* \
+           /usr/local/bin/pip*
 
 # Usuario sin privilegios y sin shell. Muchos clusters tienen una PodSecurity
 # que rechaza contenedores que corren como root, y descubrirlo en la
 # instalación es perder la mañana.
-RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin copilot \
+RUN groupadd --system --gid 10001 copilot \
+    && useradd --system --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin copilot \
     # El directorio de datos existe en la imagen y es del usuario: un volumen
     # que se monte ahí hereda ese dueño, en vez de aparecer como root y dejar
     # al proceso sin poder escribir su propia auditoría.

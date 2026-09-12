@@ -1,0 +1,35 @@
+{{ .Chart.Name }} {{ .Chart.Version }} instalado como {{ .Release.Name }} en {{ .Release.Namespace }}.
+
+1. Verificar que quedó enchufado ANTES de irte (toca cada puerto configurado):
+
+   kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "copilot.fullname" . }} -- python -m copilot preflight
+
+2. Probar que las notificaciones llegan (saltea dedup, quiet hours y tope):
+
+   kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "copilot.fullname" . }} -- python -m copilot notify-test
+
+3. Agregar el receiver al Alertmanager del cliente (en SU alertmanager.yml):
+
+   receivers:
+     - name: copilot
+       webhook_configs:
+         - url: http://{{ include "copilot.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}/v1/alerts
+           send_resolved: true
+           http_config:
+             authorization:
+               credentials_file: /etc/alertmanager/copilot-token   # el mismo COPILOT_API_TOKEN
+
+4. Preguntar algo:
+
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "copilot.fullname" . }} 8080:{{ .Values.service.port }}
+   curl -X POST http://localhost:8080/v1/chat -H "Authorization: Bearer $COPILOT_API_TOKEN" \
+     -H 'Content-Type: application/json' -d '{"message":"¿qué está firing ahora?"}'
+{{- if not .Values.networkPolicy.enabled }}
+
+AVISO: networkPolicy.enabled=false. El pod puede hablar con cualquier cosa del cluster.
+{{- end }}
+{{- if not .Values.persistence.enabled }}
+
+AVISO: persistence.enabled=false. Un reinicio olvida el dedup y el tope diario y
+re-manda lo que ya se había frenado.
+{{- end }}

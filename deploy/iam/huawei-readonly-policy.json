@@ -1,0 +1,29 @@
+{
+  "Version": "1.1",
+  "Statement": [
+    {
+      "Sid": "CloudEyeSoloLectura",
+      "Effect": "Allow",
+      "Action": [
+        "ces:*:get*",
+        "ces:*:list*"
+      ]
+    },
+    {
+      "Sid": "FacturacionSoloLectura",
+      "Effect": "Allow",
+      "Action": [
+        "bss:*:view*"
+      ]
+    },
+    {
+      "Sid": "PublicarEnElTopicDeAvisos",
+      "Effect": "Allow",
+      "Action": [
+        "smn:topic:publish",
+        "smn:topic:list",
+        "smn:topic:listSubscription"
+      ]
+    }
+  ]
+}

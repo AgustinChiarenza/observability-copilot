@@ -1,0 +1,20 @@
+{{- if .Values.serviceMonitor.enabled }}
+# Un target más en el Prometheus del cliente: las métricas del propio
+# copiloto (turnos, tools, alertas recibidas, entregas, tokens).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "copilot.fullname" . }}
+  labels:
+    {{- include "copilot.labels" . | nindent 4 }}
+    {{- with .Values.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels: {{- include "copilot.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+{{- end }}

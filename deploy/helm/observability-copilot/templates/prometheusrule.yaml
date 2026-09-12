@@ -1,0 +1,37 @@
+{{- if .Values.prometheusRule.enabled }}
+# Las alertas sobre el addon mismo. Pocas y aburridas a propósito: el
+# copiloto no puede ser una fuente de ruido nueva en el stack del cliente.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "copilot.fullname" . }}
+  labels:
+    {{- include "copilot.labels" . | nindent 4 }}
+    {{- with .Values.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: observability-copilot
+      rules:
+        - alert: CopilotCaido
+          expr: up{job=~".*{{ include "copilot.fullname" . }}.*"} == 0
+          for: 5m
+          labels: {severity: warning}
+          annotations:
+            summary: "El copiloto no responde al scrape"
+            description: "Las alertas de Alertmanager hacia /v1/alerts se están reintentando o perdiendo."
+        - alert: CopilotEntregasFallando
+          expr: sum(rate(copilot_notify_deliveries_total{ok="false"}[15m])) > 0
+          for: 15m
+          labels: {severity: warning}
+          annotations:
+            summary: "Un canal de notificación está fallando"
+            description: "Ver `kubectl exec ... -- python -m copilot preflight` y el log del pod."
+        - alert: CopilotTopeDiario
+          expr: increase(copilot_notify_deliveries_total{ok="capped"}[1h]) > 0
+          labels: {severity: info}
+          annotations:
+            summary: "Se alcanzó el tope diario de notificaciones de un canal"
+            description: "Hay un detector gritando o dispatch.daily_cap es bajo."
+{{- end }}

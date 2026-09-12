@@ -1,0 +1,12 @@
+apiVersion: v2
+name: observability-copilot
+description: >-
+  Addon de observabilidad: un agente que lee las métricas, alertas y costos que
+  el cliente ya tiene, contesta preguntas sobre esos datos y avisa cuando algo
+  se dispara. No trae ni Prometheus ni Alertmanager: se enchufa a los que hay.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords: [observability, prometheus, alertmanager, agent, finops]
+home: https://github.com/AgustinChiarenza/observability-copilot
+kubeVersion: ">=1.25.0-0"

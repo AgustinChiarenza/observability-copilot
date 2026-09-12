@@ -1,0 +1,11 @@
+# El copilot.yaml completo. Los ${VAR} se resuelven adentro del contenedor
+# contra el entorno (el Secret y `env`), así que acá no hay ningún secreto y
+# el ConfigMap se puede leer sin cuidado.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "copilot.fullname" . }}
+  labels: {{- include "copilot.labels" . | nindent 4 }}
+data:
+  copilot.yaml: |
+{{ toYaml .Values.config | indent 4 }}

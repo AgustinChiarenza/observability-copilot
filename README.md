@@ -48,6 +48,10 @@ son 60 líneas y se puede auditar de una sentada.
 
 ## Arrancar
 
+Para el cluster de un cliente: [`docs/instalacion.md`](docs/instalacion.md)
+—chart de Helm, Secret, NetworkPolicy, el receiver de Alertmanager y qué
+verificar antes de irse—. Para probarlo en una máquina, el compose:
+
 ```bash
 cp config/copilot.example.yaml config/copilot.yaml
 cp .env.example .env          # los secretos van acá, nunca en el YAML
@@ -240,6 +244,13 @@ copilot/
   store.py      JSONL y un JSON en un volumen: lo poco que sobrevive al reinicio.
   api/          FastAPI: /v1/chat, /v1/alerts, /v1/notify, /v1/status, /v1/tools, /v1/audit, salud.
   telemetry/    las métricas del propio copiloto, en /metrics.
+deploy/
+  helm/         el chart: read-only, sin token de SA, NetworkPolicy default-deny, PVC.
+  iam/          la política de Huawei Cloud de sólo lectura (+ publicar en un topic).
+scripts/
+  verify-f0.sh  el criterio de salida contra contenedores reales.
+  verify-helm.sh el chart sin cluster: lint, esquemas, y que la config rendida cargue.
+  sbom.sh       SBOM CycloneDX de la imagen y escaneo de CVEs.
 ```
 
 **La regla que sostiene todo:** fuera de `copilot/adapters/` no se importa el SDK
@@ -255,13 +266,12 @@ editar un `if` en el core para sumar uno, el diseño se rompió.
 
 | | |
 |---|---|
-| **Hecho** | puertos, registro de adapters, config validada al arranque, adapters de métricas Prometheus y Cloud Eye con presupuesto, adapters de costo PromQL y BSS, adapter de modelo OpenAI-compatible, loop del agente, 11 tools de lectura (métricas con su metadata, alertas y costo), `POST /v1/alerts` con el esquema de Alertmanager, enriquecimiento y triage, auditoría, alertas y estado del despachante persistidos en un volumen, API con auth, métricas propias, imagen y compose; **detector de pico de gasto** con despachante (dedup, quiet hours, tope diario) y canales log, webhook y SMN |
+| **Hecho** | puertos, registro de adapters, config validada al arranque, adapters de métricas Prometheus y Cloud Eye con presupuesto, adapters de costo PromQL y BSS, adapter de modelo OpenAI-compatible, loop del agente, 11 tools de lectura (métricas con su metadata, alertas y costo), `POST /v1/alerts` con el esquema de Alertmanager, enriquecimiento y triage, auditoría, alertas y estado del despachante persistidos en un volumen, API con auth, métricas propias, imagen y compose; **chart de Helm** con NetworkPolicy, SBOM y escaneo en CI, política IAM de sólo lectura y [guía de instalación](docs/instalacion.md); **detector de pico de gasto** con despachante (dedup, quiet hours, tope diario) y canales log, webhook y SMN |
 | **F1** | el adapter de métricas contra Thanos/Mimir/VictoriaMetrics en CI, mTLS, SigV4 |
 | **F2** | ruteo por severidad a canales distintos |
 | **F3** | más canales: Slack con bloques, Teams, mail |
 | **F5** | análisis declarativos en YAML |
 | **F6** | bot de Slack y Teams |
-| **F7** | Helm, NetworkPolicy, SBOM, política IAM read-only, guía de instalación |
 
 ### El criterio de salida, verificado
 
