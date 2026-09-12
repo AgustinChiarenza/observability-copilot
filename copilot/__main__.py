@@ -106,22 +106,56 @@ def _cmd_ask(args) -> int:
     return 0
 
 
+def _via_server(cfg, path: str, body: dict | None, *, timeout_s: float) -> dict | None:
+    """Le pide al servidor de esta misma instalación que lo haga él.
+
+    Los comandos que despachan (notify-test, detect) se corren con `docker
+    compose exec` o `kubectl exec` al lado de un `serve` que ya tiene el
+    estado del despachante en memoria y en el volumen. Un segundo proceso que
+    mande por su cuenta pisa ese estado al guardarlo: contadores que no
+    cuadran, un dedup que se olvida. Si el servidor responde, es él quien
+    manda; si no hay servidor (una máquina de desarrollo, un CLI suelto) se
+    hace en proceso, que entonces no le pisa nada a nadie.
+    """
+    import httpx
+
+    url = f"http://127.0.0.1:{cfg.server.port}{path}"
+    cabeceras = {"Authorization": f"Bearer {cfg.server.api_token}"} if cfg.server.api_token else {}
+    try:
+        r = httpx.post(url, json=body or {}, headers=cabeceras,
+                       timeout=httpx.Timeout(timeout_s, connect=1.0))
+    except httpx.ConnectError:
+        return None
+    except httpx.HTTPError as e:
+        print(f"el servidor en :{cfg.server.port} no contestó bien ({e}); se hace en proceso.",
+              file=sys.stderr)
+        return None
+    if r.status_code >= 400:
+        print(f"el servidor en :{cfg.server.port} devolvió {r.status_code}: {r.text[:200]}",
+              file=sys.stderr)
+        return None
+    print(f"(vía el servidor en :{cfg.server.port})", file=sys.stderr)
+    return r.json()
+
+
 def _cmd_notify_test(args) -> int:
     """Manda un mensaje de prueba por todos los canales, salteando la política.
     Es el "¿llega?" de la instalación."""
     from .ports.notify import Message, Severity
 
     cfg = load(args.config)
-    rt = build(cfg)
-    m = Message(title="Copilot: mensaje de prueba", body=args.body,
-                severity=Severity.INFO, fingerprint="notify_test")
-    out = asyncio.run(rt.dispatcher.send(m, force=True))
+    out = _via_server(cfg, "/v1/notify/test", {"body": args.body, "force": True}, timeout_s=60)
+    if out is None:
+        rt = build(cfg)
+        m = Message(title="Copilot: mensaje de prueba", body=args.body,
+                    severity=Severity.INFO, fingerprint="notify_test")
+        out = asyncio.run(rt.dispatcher.send(m, force=True)).as_dict()
     fallas = 0
-    for d in out.deliveries:
-        marca = "OK  " if d.ok else "FALLA"
-        fallas += 0 if d.ok else 1
-        print(f"  [{marca:<5}] {d.channel:<18} {d.detail}")
-    return 1 if fallas or not out.deliveries else 0
+    for d in out["deliveries"]:
+        marca = "OK  " if d["ok"] else "FALLA"
+        fallas += 0 if d["ok"] else 1
+        print(f"  [{marca:<5}] {d['channel']:<18} {d['detail']}")
+    return 1 if fallas or not out["deliveries"] else 0
 
 
 def _cmd_detect(args) -> int:
@@ -129,15 +163,18 @@ def _cmd_detect(args) -> int:
     from .detectors import cost_spike
 
     cfg = load(args.config)
-    rt = build(cfg)
     if args.dry_run:
+        # Evaluar no toca el despachante: se hace acá, sin molestar al servidor.
+        rt = build(cfg)
         if rt.cost is None:
             print("No hay CostPort configurado.", file=sys.stderr)
             return 2
         v = asyncio.run(cost_spike.evaluate(rt.cost, cfg.detectors.cost_spike))
         salida = v.as_dict()
     else:
-        salida = asyncio.run(cost_spike.run_once(rt))
+        salida = _via_server(cfg, f"/v1/detectors/{args.detector}/run", None, timeout_s=300)
+        if salida is None:
+            salida = asyncio.run(cost_spike.run_once(build(cfg)))
     print(json.dumps(salida, ensure_ascii=False, indent=2, default=str))
     return 0 if salida["outcome"] in ("spike", "clear", "no_data") else 1
 

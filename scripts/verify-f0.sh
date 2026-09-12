@@ -157,9 +157,11 @@ ok "metric_metadata lee tipo y help del Prometheus real"
 
 # El "¿llega?" de la instalación: un mensaje de prueba por cada canal,
 # salteando dedup, quiet hours y tope. Acá el canal es el log.
-salida=$(docker compose exec -T copilot python -m copilot notify-test)
+salida=$(docker compose exec -T copilot python -m copilot notify-test 2>&1)
 echo "$salida" | grep -q '\[OK   \] ops' || fail "notify-test no entregó por el canal: $salida"
-ok "notify-test entrega por todos los canales configurados"
+# Al lado de un serve, el que manda es el servidor: el CLI no le pisa el estado.
+echo "$salida" | grep -q 'vía el servidor' || fail "notify-test mandó en proceso con el servidor corriendo: $salida"
+ok "notify-test entrega por todos los canales, vía el servidor que ya corre"
 
 # El detector contra un costo que no existe en el Prometheus de juguete tiene
 # que decir que no hay datos — no inventar un baseline, no explotar.
