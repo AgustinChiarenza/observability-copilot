@@ -146,10 +146,21 @@ async def test_si_el_backend_explota_la_alerta_sale_igual(rt, prom):
 
 
 async def test_una_resuelta_no_pasa_por_el_modelo(rt):
+    await rt.ingress.receive(webhook({"name": "TargetCaido", "fp": "f4"}))
+    await rt.ingress.drain()
     await rt.ingress.receive(webhook({"name": "TargetCaido", "fp": "f4", "status": "resolved"}))
     await rt.ingress.drain()
-    assert rt.modelo.seen == []
+    assert len(rt.modelo.seen) == 1
     assert rt.canal.sent[-1].severity is Severity.RESOLVED
+
+
+async def test_una_resuelta_de_algo_que_nunca_se_aviso_no_sale(rt):
+    """Disparó en quiet hours (o se deduplicó): la 'RESUELTA' de eso sería un
+    SMS a las 3 AM por algo que nadie supo que pasaba."""
+    r = await rt.ingress.receive(webhook({"name": "TargetCaido", "fp": "f5",
+                                          "status": "resolved"}))
+    assert r["skipped"] == [{"fingerprint": "f5", "decision": "unpaired"}]
+    assert rt.canal.sent == []
 
 
 async def test_alerts_received_es_lo_que_sono(rt):
@@ -191,3 +202,14 @@ def test_post_alerts_contesta_202_enseguida_y_exige_token(client):
     assert r.json()["queued"] == ["f1"]
     listado = client.get("/v1/alerts", headers=AUTH).json()
     assert listado["alerts"][0]["fingerprint"] == "f1"
+
+
+async def test_la_tendencia_de_una_alerta_vieja_no_pide_dias_de_serie(rt, prom):
+    from datetime import UTC, datetime, timedelta
+
+    hook = webhook({"name": "TargetCaido", "fp": "f9"})
+    hook["alerts"][0]["startsAt"] = (datetime.now(UTC) - timedelta(days=5)).isoformat()
+    await rt.ingress.receive(hook)
+    await rt.ingress.drain()
+    rango = next(p for path, p in prom.calls if path == "/api/v1/query_range")
+    assert float(rango["end"]) - float(rango["start"]) <= 24 * 3600 + 60

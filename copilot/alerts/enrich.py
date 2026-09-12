@@ -29,6 +29,8 @@ from ..ports.metrics import Rule
 
 logger = logging.getLogger(__name__)
 
+_MAX_TREND_SPAN = timedelta(hours=24)
+
 
 @dataclass(frozen=True)
 class EnrichConfig:
@@ -91,7 +93,11 @@ async def _trend(rt: Any, s: Signal, e: Enrichment, cfg: EnrichConfig) -> None:
         return
     try:
         fin = datetime.now(UTC)
-        r = await rt.metrics.range(e.expression, start=s.starts_at - cfg.lookback, end=fin)
+        # Desde un rato antes del disparo hasta ahora — pero una alerta que
+        # lleva cinco días firing (Alertmanager la repite) no pide cinco días
+        # de serie: se mira lo último, que es lo que explica el estado actual.
+        inicio = max(s.starts_at - cfg.lookback, fin - _MAX_TREND_SPAN)
+        r = await rt.metrics.range(e.expression, start=inicio, end=fin)
         # Sólo las series de ESTA alerta cuando se puede distinguir: una regla
         # que dispara sobre 40 instancias devuelve 40 series y la que importa
         # es la del labelset del disparo.
@@ -130,7 +136,7 @@ def _triage_question(s: Signal, e: Enrichment) -> str:
     if e.expression:
         partes.append(f"La expresión que la dispara es: {e.expression}")
     if e.trend:
-        partes.append(f"Su tendencia en la última hora, ya consultada: {e.trend}")
+        partes.append(f"Su tendencia alrededor del disparo, ya consultada: {e.trend}")
     if e.active_alerts is not None:
         partes.append(f"Hay {e.active_alerts} alerta(s) firing en total en el backend.")
     if e.cost:

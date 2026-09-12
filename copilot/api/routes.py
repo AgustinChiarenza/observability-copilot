@@ -8,7 +8,7 @@ deploy ajeno, y eso no se hace desde acá.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -84,9 +84,18 @@ async def status(request: Request) -> dict[str, Any]:
 # --- Chat -------------------------------------------------------------------
 
 
+class HistoryTurn(BaseModel):
+    """Un turno previo. Sólo user/assistant y sólo texto: el historial lo
+    manda quien llama, y un `role: system` metido ahí reescribiría las reglas
+    del agente con el token de un usuario."""
+
+    role: Literal["user", "assistant"]
+    content: str = Field(..., max_length=8_000)
+
+
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=8_000)
-    history: list[dict[str, Any]] = Field(default_factory=list, max_length=40)
+    history: list[HistoryTurn] = Field(default_factory=list, max_length=40)
     actor: str = Field(default="anonymous", max_length=120)
 
 
@@ -119,7 +128,8 @@ async def chat(request: Request, body: ChatRequest) -> ChatResponse:
         raise HTTPException(503, "No hay ModelPort configurado.")
 
     try:
-        r = await service.answer(rt, body.message, history=body.history, actor=body.actor)
+        r = await service.answer(rt, body.message, actor=body.actor,
+                                 history=[t.model_dump() for t in body.history])
     except Exception as e:
         telemetry.AGENT_RUNS.labels(status="error").inc()
         logger.exception("chat: turno fallido")
@@ -155,10 +165,11 @@ async def audit_timeline(
     request: Request, limit: int = 100, tool: str = "", only_errors: bool = False,
 ) -> dict[str, Any]:
     """Qué se consultó contra los datos del cliente."""
-    _rt(request)
+    rt = _rt(request)
     return {
         "summary": audit.summary(),
-        "note": "Buffer en memoria: se pierde al reiniciar. La persistencia es de F7.",
+        "note": (f"Persistido en {rt.storage.root}." if rt.storage.durable else
+                 "Buffer en memoria: se pierde al reiniciar. Configurá storage.path."),
         "entries": audit.timeline(limit=min(limit, 500), tool=tool, only_errors=only_errors),
     }
 
@@ -226,7 +237,8 @@ async def alerts_recent(request: Request, limit: int = 50, only_firing: bool = F
     return {
         "pending": rt.ingress.pending,
         "total": len(rt.alert_log),
-        "note": "Buffer en memoria: se pierde al reiniciar.",
+        "note": (f"Persistido en {rt.storage.root}." if rt.storage.durable else
+                 "Buffer en memoria: se pierde al reiniciar. Configurá storage.path."),
         "alerts": [r.as_dict() for r in rt.alert_log.recent(limit=min(limit, 500),
                                                             only_firing=only_firing)],
     }

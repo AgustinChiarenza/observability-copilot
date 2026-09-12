@@ -41,6 +41,24 @@ async def test_un_resolved_pasa_siempre_y_reabre_el_dedup(canal):
     assert (await d.send(msg(), now=T0 + timedelta(minutes=10))).sent
 
 
+async def test_una_resuelta_sin_disparo_avisado_no_sale(canal):
+    d = Dispatcher([canal], Policy())
+    assert (await d.send(msg(sev=Severity.RESOLVED), now=T0)).decision == "unpaired"
+    assert canal.sent == []
+
+
+async def test_repeat_after_del_mensaje_manda_sobre_el_intervalo_general(canal):
+    """El detector de gasto corre cada hora y el mismo día sigue siendo 'el
+    último' hasta mañana: sin esto, un pico son seis SMS."""
+    d = Dispatcher([canal], Policy(repeat_interval=timedelta(hours=4)))
+    pico = Message(title="pico", body="b", severity=Severity.WARNING,
+                   fingerprint="cost_spike:2026-09-10", repeat_after=timedelta(days=3))
+    assert (await d.send(pico, now=T0)).sent
+    assert (await d.send(pico, now=T0 + timedelta(hours=5))).decision == "deduped"
+    assert (await d.send(pico, now=T0 + timedelta(days=2))).decision == "deduped"
+    assert (await d.send(pico, now=T0 + timedelta(days=4))).sent
+
+
 async def test_quiet_hours_frena_lo_que_no_es_critico(canal):
     qh = QuietHours(start=time(22, 0), end=time(7, 0), tz="America/Argentina/Buenos_Aires")
     d = Dispatcher([canal], Policy(quiet_hours=qh))

@@ -132,3 +132,38 @@ def test_la_config_rechaza_umbrales_sin_sentido(raw, campo):
         "detectors": {"cost_spike": raw},
     })
     assert any(campo in p for p in cfg.problems())
+
+
+# --- Lo que el modelo ve tiene que coincidir con lo que dispara ------------------
+
+
+async def test_cost_daily_usa_la_misma_mediana_que_el_detector():
+    """Si el detector dice 10× y la tool le dice al modelo 1.3×, el aviso y la
+    explicación se contradicen delante del cliente."""
+    from copilot.agent.registry import Context, execute
+
+    cost = FakeCost([100, 100, 100, 100, 100, 100, 1000])
+    r = (await execute("cost_daily", {"days": 7}, Context(cost=cost)))["result"]
+    v = await evaluate(cost, CFG)
+    assert r["median_day"] == 100 and r["last_vs_median"] == 10.0
+    assert v.finding is not None and round(v.finding.ratio, 2) == r["last_vs_median"]
+
+
+async def test_cost_daily_acota_la_ventana():
+    """Un `days: 3650` que se le ocurra al modelo no puede bajar diez años de
+    facturación."""
+    from copilot.agent.registry import Context, execute
+    from copilot.agent.tools_cost import MAX_DAYS
+
+    cost = FakeCost([100] * 10)
+    await execute("cost_daily", {"days": 3650}, Context(cost=cost))
+    desde, hasta = cost.asked[-1]
+    assert (hasta - desde).days + 1 == MAX_DAYS
+
+
+async def test_el_pico_no_se_repite_cada_hora_mientras_siga_siendo_el_ultimo_dia():
+    from copilot.detectors.cost_spike import to_message
+
+    v = await evaluate(FakeCost([100, 100, 100, 100, 100, 100, 200]), CFG)
+    m = to_message(v.finding)
+    assert m.repeat_after is not None and m.repeat_after >= timedelta(days=1)

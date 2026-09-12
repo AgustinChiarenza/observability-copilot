@@ -137,9 +137,13 @@ def to_message(f: Finding) -> Message:
         title=f"Pico de gasto: {f.ratio:.1f}× el día {f.day}",
         body="\n".join(lineas),
         severity=Severity.CRITICAL if f.ratio >= 3 else Severity.WARNING,
-        # Un pico es de un día. Si mañana hay otro, es otro aviso.
+        # Un pico es de un día. Si mañana hay otro, es otro aviso — y el de
+        # hoy no se repite: el detector corre cada hora y ese día sigue siendo
+        # "el último completo" hasta mañana, así que con el repeat_interval
+        # general saldrían seis avisos iguales.
         fingerprint=f"{NAME}:{f.day}",
         labels={"detector": NAME, "day": f.day},
+        repeat_after=timedelta(days=3),
     )
 
 

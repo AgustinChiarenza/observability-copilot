@@ -39,6 +39,12 @@ from .store import State
 
 logger = logging.getLogger(__name__)
 
+#: Cuánto se recuerda que un fingerprint se mandó. Más que cualquier
+#: `repeat_interval` razonable, porque además del dedup sirve para emparejar
+#: la resuelta con su disparo: una alerta que estuvo firing tres días y se
+#: resuelve tiene que poder decir "RESUELTA".
+_REMEMBER_SENT = timedelta(days=7)
+
 
 @dataclass(frozen=True)
 class QuietHours:
@@ -66,7 +72,7 @@ class Policy:
 @dataclass
 class Outcome:
     """Qué pasó con un mensaje. `decision` es una de:
-    sent | deduped | quiet | capped | no_channels."""
+    sent | deduped | quiet | capped | no_channels | unpaired."""
 
     fingerprint: str
     title: str
@@ -135,7 +141,7 @@ class Dispatcher:
         self._sent_today = {k: v for k, v in self._sent_today.items() if k[1] == hoy}
         self._cap_notified = {k for k in self._cap_notified if k[1] == hoy}
         self._last_sent = {k: v for k, v in self._last_sent.items()
-                           if now - v < self.policy.repeat_interval}
+                           if now - v < _REMEMBER_SENT}
         self._state.save({
             "last_sent": {k: v.isoformat() for k, v in self._last_sent.items()},
             "sent_today": [[c, f.isoformat(), n] for (c, f), n in self._sent_today.items()],
@@ -149,10 +155,15 @@ class Dispatcher:
         if not self.channels:
             return "no_channels"
         if m.severity is Severity.RESOLVED:
-            return "sent"
+            # Sólo se avisa que se resolvió lo que se avisó que disparó. Si el
+            # disparo quedó en quiet hours o deduplicado, una "RESUELTA" a las
+            # 3 AM es un SMS por algo que nadie supo que pasaba — y rompe la
+            # promesa de las quiet hours por la puerta de atrás.
+            return "sent" if m.fingerprint in self._last_sent else "unpaired"
         if m.fingerprint:
             previo = self._last_sent.get(m.fingerprint)
-            if previo and now - previo < self.policy.repeat_interval:
+            espera = m.repeat_after or self.policy.repeat_interval
+            if previo and now - previo < espera:
                 return "deduped"
         qh = self.policy.quiet_hours
         if qh and m.severity is not Severity.CRITICAL and qh.covers(now):

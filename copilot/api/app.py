@@ -16,6 +16,7 @@ Tres rutas de salud, y son tres cosas distintas:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -30,6 +31,8 @@ from .routes import router
 from .security import auth_middleware
 
 logger = logging.getLogger(__name__)
+
+_DRAIN_TIMEOUT_S = 25.0   # menos que el terminationGracePeriodSeconds por defecto (30)
 
 
 def create_app(config: Config | None = None) -> FastAPI:
@@ -59,6 +62,17 @@ def create_app(config: Config | None = None) -> FastAPI:
             yield
         finally:
             await scheduler.stop(tareas)
+            # Lo que se aceptó con 202 se entrega antes de morir: Alertmanager
+            # ya no lo va a reintentar. Con tope, para que un modelo colgado
+            # no bloquee el rollout.
+            ingreso = app.state.runtime._ingress
+            if ingreso is not None and ingreso.pending:
+                logger.info("apagando: %d alerta(s) en vuelo, se esperan", ingreso.pending)
+                try:
+                    await asyncio.wait_for(ingreso.drain(), timeout=_DRAIN_TIMEOUT_S)
+                except TimeoutError:
+                    logger.warning("apagando: %d alerta(s) quedaron sin entregar",
+                                   ingreso.pending)
 
     app = FastAPI(
         title="Copilot",

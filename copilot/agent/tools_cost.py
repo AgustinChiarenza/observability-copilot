@@ -29,10 +29,16 @@ def _need_cost(ctx: Context) -> CostPort:
     return ctx.cost
 
 
+#: Techo de la ventana. Contra BSS, cada mes son hasta 20.000 records: un
+#: `days: 3650` que al modelo se le ocurra no puede convertirse en 120 meses
+#: de facturación bajados de una.
+MAX_DAYS = 92
+
+
 def _window(days: int, lag_days: int) -> tuple[Any, Any]:
     hoy = datetime.now(UTC).date()
     fin = hoy - timedelta(days=max(0, lag_days))
-    return fin - timedelta(days=max(1, days) - 1), fin
+    return fin - timedelta(days=min(max(1, days), MAX_DAYS) - 1), fin
 
 
 @tool(
@@ -55,8 +61,12 @@ async def cost_daily(ctx: Context, days: int = 14) -> dict[str, Any]:
         return {"days": days, "points": [], "note": "El backend no devolvió datos de costo."}
 
     montos = [p.amount for p in puntos]
-    mediana = statistics.median(montos)
     ultimo = puntos[-1]
+    # La mediana SIN el último día, igual que el detector de picos: es el
+    # baseline contra el que se compara, y meterlo adentro lo acerca a sí
+    # mismo. Si los dos números no coincidieran, el modelo explicaría un
+    # cociente distinto del que disparó la alarma.
+    mediana = statistics.median(montos[:-1] if len(montos) > 1 else montos)
     return {
         "from": desde.isoformat(),
         "to": hasta.isoformat(),

@@ -148,7 +148,7 @@ async def test_el_estado_viejo_se_poda_al_guardar(tmp_path):
     estado = State(tmp_path / "dispatch.json")
     canal = LogNotifier(name="ops")
     d = Dispatcher([canal], Policy(repeat_interval=timedelta(hours=1)), state=estado)
-    ayer = datetime.now(UTC) - timedelta(days=1)
+    ayer = datetime.now(UTC) - timedelta(days=10)
     await d.send(_msg("vieja"), now=ayer)
     await d.send(_msg("nueva"))
     guardado = estado.load()

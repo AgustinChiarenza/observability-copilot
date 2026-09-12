@@ -174,7 +174,12 @@ class HuaweiBssCost:
         if hit and time.monotonic() - hit[0] < _CACHE_TTL_S:
             return hit[1]
         filas = await asyncio.to_thread(self._fetch_sync, start, end)
-        self._cache[llave] = (time.monotonic(), filas)
+        # Se podan las vencidas al guardar: el detector pide una ventana nueva
+        # por día y cada entrada son hasta 20.000 records por mes — sin esto,
+        # en un mes el pod tiene la facturación entera del cliente en RAM.
+        ahora = time.monotonic()
+        self._cache = {k: v for k, v in self._cache.items() if ahora - v[0] < _CACHE_TTL_S}
+        self._cache[llave] = (ahora, filas)
         return filas
 
     @staticmethod

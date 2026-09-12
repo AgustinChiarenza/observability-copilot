@@ -10,6 +10,7 @@ implementarlo (y romperlo) cinco veces.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import timedelta
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
@@ -39,6 +40,11 @@ class Message:
     fingerprint: str = ""
     url: str = ""
     labels: dict[str, str] = field(default_factory=dict)
+    #: Cuánto esperar antes de repetir este mismo fingerprint, si es distinto
+    #: del `repeat_interval` general. Un pico de gasto es un hecho de un día:
+    #: repetirlo cada 4 horas mientras siga siendo "el último día" son seis
+    #: SMS por un solo pico.
+    repeat_after: timedelta | None = None
 
 
 @dataclass(frozen=True)
