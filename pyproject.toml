@@ -18,6 +18,9 @@ huawei = [
     "huaweicloudsdksmn>=3.1,<4",
     "huaweicloudsdkces>=3.1,<4",
     "huaweicloudsdkbssintl>=3.1,<4",
+    # Transitiva del SDK; se fija el piso porque abajo de esto trae Highs con
+    # fix (lo marca el escaneo de CI). Subir el piso cuando el escaneo lo pida.
+    "pyasn1>=0.6.4",
 ]
 dev = [
     # Para testear los adapters de Huawei con clientes falsos.
