@@ -128,6 +128,30 @@ async def test_sin_dimensiones_se_expande_a_todos_los_recursos(port, v1):
     # Instant se queda con el último punto y a período crudo.
     assert r.series[0].last.value == 30.0
     assert v1.batches[-1].period == "1"
+    assert len(v1.batches) == 1              # había datos en 5 minutos: no siguió mirando
+
+
+async def test_instant_mira_mas_atras_si_en_5_minutos_no_hay_nada(port, v1):
+    """MaaS y OBS reportan cada hora o cuando pasa algo: con 5 minutos fijos
+    la primera prueba real daba count 0 para series que en rango tenían 14
+    puntos."""
+    llamadas: list[int] = []
+    original = v1.batch_list_metric_data
+
+    def escalonado(req):
+        llamadas.append(req.body.to - req.body._from)
+        if len(llamadas) < 3:                # 5m y 1h vacíos, 24h con datos
+            resp = original(req)
+            for m in resp.metrics:
+                m.datapoints = []
+            return resp
+        return original(req)
+
+    v1.batch_list_metric_data = escalonado
+    r = await port.instant("SYS.ECS/cpu_util")
+    assert len(r.series) == 2 and r.series[0].last.value == 30.0
+    assert [ms // 1000 for ms in llamadas] == [300, 3600, 86400]
+    assert v1.batches[-1].period != "1"      # 24h ya no entra crudo en max_points
 
 
 async def test_con_dimension_se_pide_solo_ese_recurso(port, v1):
@@ -175,6 +199,40 @@ async def test_las_alarmas_activas_traen_metrica_severidad_y_condicion(port):
     assert a.labels["metric"] == "SYS.ECS/cpu_util" and a.severity == "major"
     assert a.annotations["summary"] == "average(SYS.ECS/cpu_util) > 80%"
     assert a.active_at.year == 2026
+
+
+async def test_si_la_region_no_acepta_status_se_filtra_aca(v1):
+    """ap-southeast-1 contesta ces.0013 al parámetro `status`; la-south-2 lo
+    toma. Se reintenta sin él y se filtra client-side."""
+    pedidos: list = []
+
+    class V2SinStatus(FakeV2):
+        def list_alarm_histories(self, req):
+            pedidos.append(req.status)
+            if req.status is not None:
+                e = RuntimeError("ClientRequestException - {status_code:400,error_code:ces.0013,"
+                                 "error_msg:The url parameter is invalid or does not exist, "
+                                 "error parameters: [status]}")
+                e.status_code = 400
+                raise e
+            resp = super().list_alarm_histories(req)
+            resp.alarm_histories.append(AlarmHistoryItemV2(alarm_id="al2", name="Ya ok", status="ok"))
+            return resp
+
+    port = CloudEyeMetrics(client_v1=v1, client_v2=V2SinStatus(), budget=Budget(max_points=100))
+    alertas = await port.alerts()
+    assert [a.name for a in alertas] == ["CPU alta"]
+    assert pedidos == ["alarm", None]
+
+
+async def test_otro_error_de_la_api_de_alarmas_no_se_disimula(v1):
+    class V2Rota(FakeV2):
+        def list_alarm_histories(self, req):
+            raise RuntimeError("ClientRequestException - {status_code:403,error_code:CES.0403}")
+
+    port = CloudEyeMetrics(client_v1=v1, client_v2=V2Rota(), budget=Budget(max_points=100))
+    with pytest.raises(MetricsError, match=r"CES\.0403"):
+        await port.alerts()
 
 
 async def test_las_reglas_traen_la_condicion_y_marcan_las_apagadas(port):

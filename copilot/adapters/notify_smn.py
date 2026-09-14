@@ -14,6 +14,12 @@ Es el primer canal con SDK propio, y por eso importa cómo está hecho:
     avisa si el topic no tiene suscriptores, que es un canal que parece sano y
     no le llega a nadie.
 
+  - la región no hace falta: el URN del topic la trae adentro
+    (`urn:smn:<región>:<dominio>:<nombre>`). Si igual se pasa y no coincide,
+    es un error de arranque que nombra las dos, porque el síntoma sin eso es
+    un "Topic not found" contra la región equivocada. Pasó en la primera
+    prueba real.
+
 Las credenciales (AK/SK) vienen del YAML por `${VAR}` y no se loguean nunca.
 """
 from __future__ import annotations
@@ -26,6 +32,11 @@ from ..ports.notify import Delivery, Message
 from . import register
 
 logger = logging.getLogger(__name__)
+
+
+def _region_of(topic_urn: str) -> str:
+    partes = topic_urn.split(":")
+    return partes[2] if len(partes) == 5 and partes[:2] == ["urn", "smn"] else ""
 
 
 @register("notify", "smn")
@@ -44,12 +55,22 @@ class SmnNotifier:
         client: Any = None,
         **_ignored: Any,
     ):
-        faltan = [k for k, v in (("region", region), ("topic_urn", topic_urn),
-                                 ("ak", ak), ("sk", sk)) if not v]
+        faltan = [k for k, v in (("topic_urn", topic_urn), ("ak", ak), ("sk", sk)) if not v]
         if faltan and client is None:
             raise ValueError(
                 f"notify[{name}]: faltan {', '.join(faltan)}. Van en el YAML como "
                 f"${{VAR}} y los valores en el entorno, nunca en el archivo.")
+        del_urn = _region_of(topic_urn)
+        if region and del_urn and region != del_urn:
+            raise ValueError(
+                f"notify[{name}]: region es '{region}' pero el topic_urn es de "
+                f"'{del_urn}'. Un topic vive en una sola región; sacá `region` "
+                f"y se toma del URN.")
+        region = region or del_urn
+        if not region and not endpoint and client is None:
+            raise ValueError(
+                f"notify[{name}]: no se pudo sacar la región del topic_urn (se "
+                f"esperaba urn:smn:<región>:<dominio>:<nombre>). Pasá `region`.")
         self.name = name
         self.max_chars = int(max_chars)
         self._topic = topic_urn

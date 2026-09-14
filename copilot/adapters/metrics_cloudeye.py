@@ -66,6 +66,8 @@ QUERY_SYNTAX = """\
   dimensión) lista sus valores, acotando con matches=["SYS.ECS/cpu_util"].
 """
 
+#: Ventanas del instant, de la más corta a la más larga (ver `instant`).
+_INSTANT_LOOKBACKS = (timedelta(minutes=5), timedelta(hours=1), timedelta(days=1))
 _PERIODS = (1, 300, 1200, 3600, 14400, 86400)
 _AGG = {"avg": "average", "max": "max", "min": "min", "sum": "sum"}
 _RE_QUERY = re.compile(
@@ -272,8 +274,21 @@ class CloudEyeMetrics:
     async def instant(self, query: str, *, at: datetime | None = None) -> Instant:
         sel = parse_query(query)
         momento = at or datetime.now(UTC)
-        # Los últimos 5 minutos a período 1: el último punto es "ahora".
-        series, truncado = await self._fetch(sel, momento - timedelta(minutes=5), momento, 1)
+        # "El último valor" no está a la misma distancia para todo: un ECS
+        # reporta cada 5 minutos, MaaS u OBS cada hora o cuando pasa algo. Se
+        # mira 5 minutos, y si no hay nada, una hora, y si no, un día; el
+        # timestamp del sample dice de cuándo es. Con 5 minutos fijos, la
+        # primera prueba real devolvía "count: 0" para métricas que en rango
+        # tenían 14 puntos.
+        series: list[Series] = []
+        truncado = False
+        for atras in _INSTANT_LOOKBACKS:
+            # Crudo mientras la ventana lo permita: el último valor real, no
+            # un promedio del período.
+            period = 1 if atras <= timedelta(hours=1) else self.pick_period(atras)
+            series, truncado = await self._fetch(sel, momento - atras, momento, period)
+            if any(s.samples for s in series):
+                break
         ultimos = [Series(labels=s.labels, samples=[s.samples[-1]]) for s in series if s.samples]
         return Instant(query=query, at=momento, series=ultimos, truncated=truncado)
 
@@ -337,13 +352,26 @@ class CloudEyeMetrics:
         from huaweicloudsdkces.v2 import ListAlarmHistoriesRequest
 
         ahora = datetime.now(UTC)
-        req = ListAlarmHistoriesRequest(
-            status="alarm", limit=100,
-            _from=int((ahora - timedelta(days=1)).timestamp() * 1000),
-            to=int(ahora.timestamp() * 1000))
-        resp = await self._call(self._v2.list_alarm_histories, req, what="list_alarm_histories")
+        ventana = {"_from": int((ahora - timedelta(days=1)).timestamp() * 1000),
+                   "to": int(ahora.timestamp() * 1000), "limit": 100}
+        try:
+            resp = await self._call(
+                self._v2.list_alarm_histories, ListAlarmHistoriesRequest(status="alarm", **ventana),
+                what="list_alarm_histories")
+            historias = list(resp.alarm_histories or [])
+        except MetricsError as e:
+            # No todas las regiones aceptan `status` (ap-southeast-1 contesta
+            # ces.0013 "parameter [status] does not exist"; la-south-2 lo
+            # toma). Se pide sin filtro y se filtra acá.
+            if "[status]" not in str(e):
+                raise
+            resp = await self._call(
+                self._v2.list_alarm_histories, ListAlarmHistoriesRequest(**ventana),
+                what="list_alarm_histories")
+            historias = [h for h in (resp.alarm_histories or [])
+                         if getattr(h, "status", "") == "alarm"]
         salida: list[Alert] = []
-        for h in (resp.alarm_histories or [])[: self.budget.max_series]:
+        for h in historias[: self.budget.max_series]:
             metric = getattr(h, "metric", None)
             cond = getattr(h, "condition", None)
             labels = {"alarm_id": h.alarm_id or "", "alertname": h.name or "",

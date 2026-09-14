@@ -40,6 +40,10 @@ from . import register
 logger = logging.getLogger(__name__)
 
 _PAGE = 100
+#: Sin esto los nombres de servicio vienen en chino ("弹性云服务器" por ECS)
+#: aunque la cuenta sea de la nube internacional. Se vio en la primera prueba
+#: real; el agente no tiene por qué traducir facturas.
+_LANG = "en_US"
 _PARALLEL = 6
 _MAX_RECORDS = 20_000
 _CACHE_TTL_S = 600.0
@@ -142,7 +146,7 @@ class HuaweiBssCost:
                 # último mes N veces.
                 req = Req(cycle=ciclo, bill_date_begin=desde.isoformat(),
                           bill_date_end=hasta.isoformat(), method="oneself",
-                          limit=_PAGE, offset=offset)
+                          limit=_PAGE, offset=offset, x_language=_LANG)
                 return self._client.list_customerself_resource_records(req)
 
             try:
@@ -236,7 +240,8 @@ class HuaweiBssCost:
         Req = self._request_cls()
         ayer = date.today() - timedelta(days=1)  # noqa: DTZ011 — BSS es de día calendario
         req = Req(cycle=ayer.strftime("%Y-%m"), bill_date_begin=ayer.isoformat(),
-                  bill_date_end=ayer.isoformat(), method="oneself", limit=1, offset=0)
+                  bill_date_end=ayer.isoformat(), method="oneself", limit=1, offset=0,
+                  x_language=_LANG)
         try:
             await asyncio.to_thread(self._client.list_customerself_resource_records, req)
         except Exception as e:

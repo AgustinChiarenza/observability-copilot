@@ -79,8 +79,7 @@ config:
       url: ${SLACK_WEBHOOK_URL}
     - name: guardia
       adapter: smn
-      region: la-south-2
-      topic_urn: ${SMN_TOPIC_URN}
+      topic_urn: ${SMN_TOPIC_URN}   # la región sale del URN
       ak: ${HW_AK}
       sk: ${HW_SK}
       max_chars: 400

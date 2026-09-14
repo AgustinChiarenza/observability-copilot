@@ -52,3 +52,20 @@ async def test_check_no_publica_y_avisa_si_nadie_escucha():
         await SmnNotifier(topic_urn="urn:x", client=fake).check()
     assert fake.published == []
     await SmnNotifier(topic_urn="urn:x", client=FakeSmn(subs=2)).check()
+
+
+def test_la_region_sale_del_urn_y_si_se_pasa_distinta_es_un_error():
+    """Pasó en la primera prueba real: `region: la-south-2` con un topic de
+    ap-southeast-1, y el SDK contestaba "Topic not found"."""
+    with pytest.raises(ValueError, match=r"la-south-2.*ap-southeast-1"):
+        SmnNotifier(region="la-south-2", ak="a", sk="s",
+                    topic_urn="urn:smn:ap-southeast-1:dominio:topic")
+    # Sin `region`, se toma del URN: llega al SDK y no explota antes.
+    n = SmnNotifier(ak="a", sk="s", topic_urn="urn:smn:ap-southeast-1:dominio:topic",
+                    client=object())
+    assert n._topic.startswith("urn:smn:ap-southeast-1")
+
+
+def test_un_urn_raro_sin_region_lo_dice():
+    with pytest.raises(ValueError, match="no se pudo sacar la región"):
+        SmnNotifier(ak="a", sk="s", topic_urn="cualquier-cosa")

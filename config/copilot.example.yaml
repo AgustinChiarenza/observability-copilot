@@ -110,8 +110,8 @@ notify:
   # construida con --build-arg EXTRAS=huawei.
   # - name: guardia
   #   adapter: smn
-  #   region: la-south-2
-  #   topic_urn: ${SMN_TOPIC_URN}
+  #   topic_urn: ${SMN_TOPIC_URN}   # la región sale del URN
+
   #   ak: ${HW_AK}
   #   sk: ${HW_SK}
   #   max_chars: 400        # un SMS recorta a ~490 bytes; con sólo mail, subilo

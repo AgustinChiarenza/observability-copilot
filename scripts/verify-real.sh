@@ -52,7 +52,9 @@ paso() {   # paso "título" cmd...
 paso "preflight: cada puerto con la credencial real" "$PY" -m copilot preflight
 paso "metric_metadata: qué métricas ve" "$PY" -m copilot tool metric_metadata '{"limit": 15}'
 paso "alerts_active: qué alarmas están sonando" "$PY" -m copilot tool alerts_active
-paso "alert_rules: qué reglas hay" "$PY" -m copilot tool alert_rules '{"limit": 10}'
+paso "alert_rules: qué reglas hay" "$PY" -m copilot tool alert_rules
+paso "promql_instant: una consulta de métricas (VERIFY_QUERY en .env)" \
+  "$PY" -m copilot tool promql_instant "{\"query\": \"${VERIFY_QUERY:-up}\"}"
 paso "cost_daily: el gasto de los últimos días" "$PY" -m copilot tool cost_daily '{"days": 7}'
 paso "cost_by_service: por servicio" "$PY" -m copilot tool cost_by_service '{"days": 7}'
 paso "cost_spike en seco: evalúa sin despachar" "$PY" -m copilot detect cost_spike --dry-run
