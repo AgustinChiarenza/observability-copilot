@@ -22,6 +22,14 @@ RUN pip install --no-cache-dir --upgrade pip \
 # --- runtime ---------------------------------------------------------------
 FROM python:3.14-slim
 
+# Los parches de seguridad de Debian se aplican al construir, no cuando Docker
+# Hub decida reconstruir la base: entre una cosa y la otra pasan semanas, y en
+# ese hueco el escaneo del cliente (y el nuestro en CI) marca libc, perl y
+# sqlite con CVEs que ya tienen fix publicado.
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # El pip del sistema tampoco hace falta, y el escáner lo ve igual.
 RUN rm -rf /usr/local/lib/python3.14/site-packages/pip* \
            /usr/local/lib/python3.14/site-packages/setuptools* \
