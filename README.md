@@ -24,7 +24,7 @@ No trae TSDB. No trae motor de reglas. No toca infraestructura.
 
 ## Por qué está armado así
 
-**No compite con lo que ya tienen.** El cliente tiene reglas de Prometheus y un
+**No compite con lo que ya tienen.** Se pueden tener reglas de Prometheus y un
 Alertmanager que funciona, con `for:`, inhibición, silences y dedup en HA.
 Escribir otro evaluador de umbrales sería competir contra un componente en el
 que ya confían, con menos funcionalidad y sin su historial. Este producto recibe
@@ -32,7 +32,7 @@ lo que ese Alertmanager ya decidió y le agrega lo que él no puede hacer:
 contexto, correlación con costo y una explicación.
 
 **El costo se lee de donde ya está.** El adapter por defecto no va a una API de
-facturación: corre PromQL contra la misma TSDB de las métricas. Si el cliente ya
+facturación: corre PromQL contra la misma TSDB de las métricas. Si ya
 exporta su gasto —kubecost, opencost, un exporter de billing, un recording rule
 sobre la factura— el dato ya está en casa: responde en milisegundos, no pide
 credenciales nuevas y no tiene rate limit.
