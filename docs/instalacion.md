@@ -138,6 +138,12 @@ kubectl -n copilot exec deploy/copilot-observability-copilot -- python -m copilo
 kubectl -n copilot exec deploy/copilot-observability-copilot -- python -m copilot notify-test
 ```
 
+Desde afuera del cluster, con el `.env` completo y `config/copilot.yaml`
+apuntando a las credenciales reales, `scripts/verify-real.sh` corre lo mismo y
+además cada tool de lectura y el detector en seco; con `--notify` manda el
+mensaje de prueba y con `--ask "..."` una pregunta al modelo. No imprime
+secretos.
+
 `preflight` toca cada puerto con las credenciales reales y dice, uno por uno,
 qué anda. `notify-test` manda un mensaje por cada canal salteando dedup, quiet
 hours, tope y ruteo por severidad: si no llega, no es la política, es el canal.
