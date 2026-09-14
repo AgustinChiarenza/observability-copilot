@@ -16,6 +16,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 TOKEN="${COPILOT_API_TOKEN:-dev-token-no-usar-en-produccion}"
 export COPILOT_API_TOKEN="$TOKEN"
+# docker compose también lee .env: si el modelo está ahí, el copiloto lo va a
+# tener aunque el shell no. Se mira sólo esa clave, sin cargar el archivo.
+if [ -z "${MODEL_BASE_URL:-}" ] && [ -f .env ]; then
+  MODEL_BASE_URL="$(grep -E '^MODEL_BASE_URL=' .env | cut -d= -f2- | tr -d '[:space:]' || true)"
+fi
 
 # Puertos altos por defecto: en una máquina de desarrollo casi siempre hay otro
 # stack con algo en 9090, y esta verificación no tiene por qué pelearse con él.
@@ -132,6 +137,40 @@ echo "$salida" | grep -q '"name": *"TargetCaido"' || fail "no llegó TargetCaido
 echo "$salida" | grep -q '"decision": *"sent"' || fail "la alerta no se entregó: $salida"
 echo "$salida" | grep -q '"expression": *"up == 0"' || fail "no se enriqueció con la regla: $salida"
 ok "Alertmanager real → /v1/alerts: recibida, enriquecida con la regla y entregada"
+if [ -n "${MODEL_BASE_URL:-}" ]; then
+  echo "$salida" | grep -q '"triage": *"[^"]' || fail "con modelo, la alerta tendría que traer triage: $salida"
+  ok "la alerta salió con el triage del modelo"
+fi
+
+# La otra mitad de la conversación: una alerta que se RESUELVE. amtool la
+# crea en el Alertmanager real con fin a 20 segundos; Alertmanager manda el
+# firing y, cuando vence, el resolved (send_resolved: true). El copiloto
+# tiene que entregar los dos, y el segundo por haber entregado el primero.
+echo "→ Una alerta que se resuelve sola (amtool, fin en 20s)"
+fin=$(docker compose exec -T copilot python -c \
+  "from datetime import UTC, datetime, timedelta; print((datetime.now(UTC)+timedelta(seconds=20)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+docker compose exec -T alertmanager amtool --alertmanager.url=http://localhost:9093 alert add \
+  alertname=SeResuelveSola severity=critical instance=amtool \
+  --annotation=summary='una alerta de prueba que vence sola' --end="$fin" >/dev/null \
+  || fail "amtool no pudo crear la alerta"
+cuenta_sent() {   # cuántos registros de SeResuelveSola terminaron en "sent"
+  python3 -c '
+import json, sys
+rs = [r for r in json.load(sys.stdin)["alerts"] if r["name"] == "SeResuelveSola"]
+print(sum(1 for r in rs if r["decision"] == "sent"))' 2>/dev/null || echo 0
+}
+# El triage del firing puede tardar más que los 20s de vida de la alerta: la
+# resuelta llega antes y tiene que esperar a que su firing salga, no perderse.
+for _ in $(seq 1 150); do
+  salida=$(curl -sf -H "Authorization: Bearer $TOKEN" "${APP}/v1/alerts?limit=10" || true)
+  [ "$(echo "$salida" | cuenta_sent)" = 2 ] && break
+  sleep 1
+done
+echo "$salida" | grep -q '"name": *"SeResuelveSola"' || fail "no llegó SeResuelveSola: $salida"
+echo "$salida" | grep -q '"status": *"resolved"' || fail "no llegó la resuelta: $salida"
+[ "$(echo "$salida" | cuenta_sent)" = 2 ] \
+  || fail "el firing y el resolved tendrían que haberse entregado los dos: $salida"
+ok "Alertmanager real → firing y resolved, los dos entregados y emparejados"
 
 # La persistencia, contra el volumen real y el contenedor read-only: lo que
 # llegó tiene que seguir estando después de reiniciar el proceso, y el
@@ -146,7 +185,7 @@ done
 salida=$(curl -sf -H "Authorization: Bearer $TOKEN" "${APP}/v1/alerts?limit=5")
 echo "$salida" | grep -q '"name": *"TargetCaido"' || fail "la alerta no sobrevivió al reinicio: $salida"
 salida=$(curl -sf -H "Authorization: Bearer $TOKEN" "${APP}/v1/notify")
-echo "$salida" | grep -q '"ops": *1' || fail "el despachante olvidó lo que mandó: $salida"
+echo "$salida" | grep -q '"ops": *3' || fail "el despachante olvidó lo que mandó (TargetCaido + firing y resolved de SeResuelveSola): $salida"
 ok "tras reiniciar, la alerta sigue en /v1/alerts y el despachante recuerda el envío"
 
 salida=$(docker compose exec -T copilot python -m copilot tool \

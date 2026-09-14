@@ -163,6 +163,62 @@ async def test_una_resuelta_de_algo_que_nunca_se_aviso_no_sale(rt):
     assert rt.canal.sent == []
 
 
+# --- Lo que está en vuelo -----------------------------------------------------
+# Un triage tarda más que una alerta corta. Los dos casos se vieron contra un
+# Alertmanager real (verify-f0.sh): el firing reenviado por group_interval y
+# la resuelta que llega antes de que el triage termine.
+
+
+@pytest.fixture
+def triage_lento(monkeypatch):
+    import asyncio
+
+    from copilot.alerts import enrich
+
+    async def _lento(rt, s, e):
+        await asyncio.sleep(0.05)
+        e.triage = "lento"
+
+    monkeypatch.setattr(enrich, "_triage", _lento)
+
+
+async def test_la_resuelta_que_llega_con_el_firing_en_vuelo_espera_y_sale(rt, triage_lento):
+    await rt.ingress.receive(webhook({"name": "TargetCaido", "fp": "v1"}))
+    r = await rt.ingress.receive(webhook({"name": "TargetCaido", "fp": "v1", "status": "resolved"}))
+    assert r["queued"] == ["v1"] and r["skipped"] == []       # no fue "unpaired"
+    await rt.ingress.drain()
+    assert [m.severity for m in rt.canal.sent] == [Severity.WARNING, Severity.RESOLVED]
+    decisiones = {(x.signal.status, x.decision) for x in rt.alert_log.recent()}
+    assert decisiones == {(SignalStatus.FIRING, "sent"), (SignalStatus.RESOLVED, "sent")}
+
+
+async def test_el_firing_repetido_en_vuelo_no_se_procesa_dos_veces(rt, triage_lento):
+    hook = webhook({"name": "TargetCaido", "fp": "v2"})
+    await rt.ingress.receive(hook)
+    r = await rt.ingress.receive(hook)
+    assert r["skipped"] == [{"fingerprint": "v2", "decision": "inflight"}]
+    await rt.ingress.drain()
+    assert len(rt.canal.sent) == 1
+    # Terminado el vuelo, la repetición vuelve a la política normal: dedup.
+    r = await rt.ingress.receive(hook)
+    assert r["skipped"] == [{"fingerprint": "v2", "decision": "deduped"}]
+
+
+async def test_si_el_firing_en_vuelo_no_salio_la_resuelta_tampoco(rt, triage_lento):
+    """El firing quedó en el tope mientras se enriquecía: la resuelta espera,
+    y al decidir se entera de que no hay a quién avisarle."""
+    rt.dispatcher.policy = Policy(daily_cap=1)
+    await rt.dispatcher.send(to_message(alertmanager.parse(
+        webhook({"name": "Otra", "fp": "x"}))[0][0], None))   # consume el tope
+    await rt.ingress.receive(webhook({"name": "TargetCaido", "fp": "v3"}))
+    r = await rt.ingress.receive(webhook({"name": "TargetCaido", "fp": "v3", "status": "resolved"}))
+    assert r["queued"] == ["v3"]
+    await rt.ingress.drain()
+    decisiones = {(x.signal.status, x.decision) for x in rt.alert_log.recent()
+                  if x.signal.name == "TargetCaido"}
+    assert decisiones == {(SignalStatus.FIRING, "capped"), (SignalStatus.RESOLVED, "unpaired")}
+
+
 async def test_alerts_received_es_lo_que_sono(rt):
     await rt.ingress.receive(webhook({"name": "TargetCaido", "fp": "f5"}))
     await rt.ingress.drain()

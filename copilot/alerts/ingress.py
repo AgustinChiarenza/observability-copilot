@@ -11,6 +11,16 @@ El orden importa por plata: decidir es gratis, enriquecer cuesta tokens. Una
 alerta que el despachante va a deduplicar no gasta un turno del agente para
 después descartarse.
 
+Lo que está en vuelo cuenta. Mientras el firing de un fingerprint se enriquece
+—un triage puede tardar más que lo que dura una alerta corta—, el despachante
+todavía no sabe que salió. Sin esto pasaban dos cosas, y las dos se vieron
+contra un Alertmanager real: el mismo firing reenviado por `group_interval`
+se procesaba dos veces (dos triages, dos avisos), y la resuelta que llegaba
+antes de que terminara el triage se descartaba como `unpaired` — el operador
+recibía el disparo y nunca el cierre. Ahora un firing repetido en vuelo se
+saltea (`inflight`) y una resuelta espera a que su firing termine, y recién
+ahí se decide.
+
 `AlertLog` es la memoria de lo que llegó y qué se hizo. Anillo en memoria y,
 con `storage.path`, un JSONL al que se anexa cada alerta cuando termina de
 procesarse —no al llegar: se guarda con su decisión y su enriquecimiento, que
@@ -166,6 +176,9 @@ class Ingress:
         self._rt, self._cfg, self._log = rt, cfg, log
         self._sem = asyncio.Semaphore(max(1, cfg.max_concurrent))
         self._pending: set[asyncio.Task] = set()
+        #: El firing en vuelo por fingerprint, para que su repetición se saltee
+        #: y su resuelta lo espere.
+        self._inflight: dict[str, asyncio.Task] = {}
 
     @property
     def pending(self) -> int:
@@ -180,8 +193,19 @@ class Ingress:
             telemetry.ALERTS_RECEIVED.labels(status=str(s.status)).inc()
             rec = Record(signal=s, received_at=ahora)
             self._log.add(rec)
-            # Decidir ahora, enriquecer después: una deduplicada no gasta tokens.
-            decision = self._rt.dispatcher.decide(to_message(s, None))
+            en_vuelo = self._inflight.get(s.fingerprint)
+            if en_vuelo is not None and en_vuelo.done():
+                en_vuelo = None
+            if en_vuelo is not None and s.status is SignalStatus.FIRING:
+                decision = "inflight"
+            elif en_vuelo is not None:
+                # La resuelta de algo que todavía se está enriqueciendo: se
+                # decide cuando el firing termine, no ahora que el
+                # despachante aún no lo vio salir.
+                decision = "sent"
+            else:
+                # Decidir ahora, enriquecer después: una deduplicada no gasta tokens.
+                decision = self._rt.dispatcher.decide(to_message(s, None))
             if decision == "sent" and len(self._pending) >= self._cfg.queue_max:
                 decision = "overloaded"
             if decision != "sent":
@@ -190,12 +214,30 @@ class Ingress:
                 telemetry.ALERTS_PROCESSED.labels(decision=decision).inc()
                 salteadas.append({"fingerprint": s.fingerprint, "decision": decision})
                 continue
-            t = asyncio.create_task(self._process(rec), name=f"alert:{s.fingerprint}")
+            corrida = self._after(en_vuelo, rec) if en_vuelo is not None else self._process(rec)
+            t = asyncio.create_task(corrida, name=f"alert:{s.fingerprint}")
             self._pending.add(t)
             t.add_done_callback(self._pending.discard)
+            if s.status is SignalStatus.FIRING:
+                self._inflight[s.fingerprint] = t
+                t.add_done_callback(lambda done, fp=s.fingerprint: (
+                    self._inflight.pop(fp, None) if self._inflight.get(fp) is done else None))
             encoladas.append(s.fingerprint)
         return {"received": len(señales), "queued": encoladas, "skipped": salteadas,
                 "rejected": rechazos}
+
+    async def _after(self, previo: asyncio.Task, rec: Record) -> None:
+        """Una resuelta que llegó con su firing en vuelo: espera, y recién ahí
+        pasa por la política (que ahora sí sabe si el disparo salió)."""
+        await asyncio.wait({previo})
+        decision = self._rt.dispatcher.decide(to_message(rec.signal, None))
+        if decision != "sent":
+            rec.decision = decision
+            rec.finished_at = datetime.now(UTC).isoformat()
+            self._log.persist(rec)
+            telemetry.ALERTS_PROCESSED.labels(decision=rec.decision).inc()
+            return
+        await self._process(rec)
 
     async def _process(self, rec: Record) -> None:
         s = rec.signal
