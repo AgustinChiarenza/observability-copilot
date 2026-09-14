@@ -12,7 +12,7 @@ No trae TSDB. No trae motor de reglas. No toca infraestructura.
  │ Prometheus / Thanos /  │◀────────────│ MetricsPort                  │
  │ Mimir / VictoriaMetrics│             │                              │
  ├────────────────────────┤   webhook   │                              │
- │ Alertmanager           │────────────▶│ AlertIngress        (F2)     │
+ │ Alertmanager           │────────────▶│ AlertIngress                 │
  ├────────────────────────┤             │                              │
  │ Su gasto, donde esté   │◀────────────│ CostPort                     │
  ├────────────────────────┤  OpenAI API │                              │
@@ -95,7 +95,8 @@ Las alertas se leen del mismo backend de métricas (`/api/v1/alerts` y
 `/api/v1/rules`, que exponen Prometheus, vmalert y los Ruler de Thanos/Mimir):
 qué está firing, desde cuándo, y la expresión de la regla que lo disparó —que
 es la query para correr en rango y explicarlo. Es lo que el backend **evalúa**,
-no lo que **suena**: silences e inhibición son de Alertmanager y llegan en F2.
+no lo que **suena**: silences e inhibición son de Alertmanager, y lo que pasa
+por ellas es lo que llega al receiver de abajo.
 
 ## Las alertas que ya suenan
 
@@ -177,6 +178,12 @@ de `repeat_interval`, lo que no es crítico espera fuera de `quiet_hours`, y hay
 un `daily_cap` por canal que al alcanzarse manda un último aviso y calla hasta
 el día siguiente. Es la línea que separa "un bug en el detector" de "200 SMS
 una madrugada".
+
+Cada canal dice qué severidades recibe: `severities: [critical]` en el SMS de
+guardia, `[critical, warning]` en Slack, nada en el `log` para que reciba todo.
+Una resuelta no se rutea por severidad: **va a los canales que recibieron el
+disparo**, que son los que necesitan saber que terminó. Y la config no arranca
+si una severidad quedó sin canal: casi siempre es un typo, no una decisión.
 
 Canales: `log`, `webhook` (Slack, Teams, lo que reciba JSON) y `smn` de Huawei
 (SMS, mail o HTTP, lo que tenga suscripto el topic). SMN es la primera pieza
@@ -266,9 +273,8 @@ editar un `if` en el core para sumar uno, el diseño se rompió.
 
 | | |
 |---|---|
-| **Hecho** | puertos, registro de adapters, config validada al arranque, adapters de métricas Prometheus y Cloud Eye con presupuesto, adapters de costo PromQL y BSS, adapter de modelo OpenAI-compatible, loop del agente, 11 tools de lectura (métricas con su metadata, alertas y costo), `POST /v1/alerts` con el esquema de Alertmanager, enriquecimiento y triage, auditoría, alertas y estado del despachante persistidos en un volumen, API con auth, métricas propias, imagen y compose; **chart de Helm** con NetworkPolicy, SBOM y escaneo en CI, política IAM de sólo lectura y [guía de instalación](docs/instalacion.md); **detector de pico de gasto** con despachante (dedup, quiet hours, tope diario) y canales log, webhook y SMN |
+| **Hecho** | puertos, registro de adapters, config validada al arranque, adapters de métricas Prometheus y Cloud Eye con presupuesto, adapters de costo PromQL y BSS, adapter de modelo OpenAI-compatible, loop del agente, 11 tools de lectura (métricas con su metadata, alertas y costo), `POST /v1/alerts` con el esquema de Alertmanager, enriquecimiento y triage, auditoría, alertas y estado del despachante persistidos en un volumen, API con auth, métricas propias, imagen y compose; **chart de Helm** con NetworkPolicy, SBOM y escaneo en CI, política IAM de sólo lectura y [guía de instalación](docs/instalacion.md); **detector de pico de gasto** con despachante (dedup, quiet hours, tope diario, **ruteo por severidad**) y canales log, webhook y SMN |
 | **F1** | el adapter de métricas contra Thanos/Mimir/VictoriaMetrics en CI, mTLS, SigV4 |
-| **F2** | ruteo por severidad a canales distintos |
 | **F3** | más canales: Slack con bloques, Teams, mail |
 | **F5** | análisis declarativos en YAML |
 | **F6** | bot de Slack y Teams |

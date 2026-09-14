@@ -77,6 +77,14 @@ config:
     - name: ops
       adapter: webhook          # o smn, o log mientras se prueba
       url: ${SLACK_WEBHOOK_URL}
+    - name: guardia
+      adapter: smn
+      region: la-south-2
+      topic_urn: ${SMN_TOPIC_URN}
+      ak: ${HW_AK}
+      sk: ${HW_SK}
+      max_chars: 400
+      severities: [critical]    # el SMS sólo para lo crítico; `ops` recibe todo
   dispatch:
     repeat_interval: 4h
     quiet_hours: {start: "23:00", end: "07:00", tz: America/Argentina/Buenos_Aires}
@@ -132,7 +140,7 @@ kubectl -n copilot exec deploy/copilot-observability-copilot -- python -m copilo
 
 `preflight` toca cada puerto con las credenciales reales y dice, uno por uno,
 qué anda. `notify-test` manda un mensaje por cada canal salteando dedup, quiet
-hours y tope: si no llega, no es la política, es el canal.
+hours, tope y ruteo por severidad: si no llega, no es la política, es el canal.
 
 Si `preflight` falla en `metrics` con timeout, casi siempre es la
 NetworkPolicy: el selector de `egressTo` no matchea el namespace o el pod del

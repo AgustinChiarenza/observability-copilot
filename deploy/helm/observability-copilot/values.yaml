@@ -29,6 +29,7 @@ config:
   notify:
     - name: ops
       adapter: log
+      # severities: [critical, warning]   # sin la clave recibe todo
   dispatch:
     repeat_interval: 4h
     daily_cap: 50

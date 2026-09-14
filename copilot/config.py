@@ -30,6 +30,7 @@ from .alerts.enrich import EnrichConfig
 from .detectors.cost_spike import SpikeConfig
 from .dispatch import Policy, QuietHours
 from .ports.metrics import Budget
+from .ports.notify import Severity
 
 DEFAULT_PATH = os.getenv("COPILOT_CONFIG", "/etc/copilot/copilot.yaml")
 
@@ -146,7 +147,33 @@ def _parse_hhmm(raw: Any, *, where: str) -> time:
         raise ConfigError(f"{where}: '{raw}' no es una hora. Usá HH:MM, por ejemplo 22:00.") from e
 
 
-def _parse_dispatch(raw: dict[str, Any]) -> Policy:
+def _parse_severities(raw: Any, *, where: str) -> frozenset[Severity]:
+    """`severities: [critical, warning]` en un canal. `resolved` no se lista:
+    la resuelta va por donde fue el disparo, siempre."""
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, list) or not raw:
+        raise ConfigError(
+            f"{where}: tiene que ser una lista no vacía, por ejemplo [critical, "
+            f"warning]. Para que el canal reciba todo, sacá la clave.")
+    out: set[Severity] = set()
+    for v in raw:
+        try:
+            sev = Severity(str(v).strip().lower())
+        except ValueError as e:
+            raise ConfigError(
+                f"{where}: '{v}' no es una severidad. Son: critical, warning, "
+                f"info.") from e
+        if sev is Severity.RESOLVED:
+            raise ConfigError(
+                f"{where}: 'resolved' no se lista. La resuelta va a los canales "
+                f"que recibieron el disparo, sin configurarlo.")
+        out.add(sev)
+    return frozenset(out)
+
+
+def _parse_dispatch(raw: dict[str, Any], *,
+                    routes: dict[str, frozenset[Severity]] | None = None) -> Policy:
     qh = raw.get("quiet_hours") or None
     quiet = None
     if qh:
@@ -169,6 +196,7 @@ def _parse_dispatch(raw: dict[str, Any]) -> Policy:
             raw.get("repeat_interval", "4h"), where="dispatch.repeat_interval"),
         quiet_hours=quiet,
         daily_cap=int(raw.get("daily_cap", 50)),
+        routes=dict(routes or {}),
     )
 
 
@@ -255,6 +283,20 @@ class Config:
         notify_raw = raw.get("notify") or []
         if not isinstance(notify_raw, list):
             raise ConfigError("notify: tiene que ser una lista de canales.")
+        # `severities` es del ruteo, no del adapter: se saca antes de que las
+        # opciones le lleguen crudas al constructor del canal.
+        notify: list[AdapterConfig] = []
+        routes: dict[str, frozenset[Severity]] = {}
+        for i, c in enumerate(notify_raw):
+            if isinstance(c, dict) and "severities" in c:
+                c = dict(c)
+                sevs = _parse_severities(c.pop("severities"), where=f"notify[{i}].severities")
+            else:
+                sevs = None
+            canal = AdapterConfig.parse(c, where=f"notify[{i}]")
+            notify.append(canal)
+            if sevs is not None:
+                routes[canal.name] = sevs
 
         return cls(
             server=server,
@@ -266,9 +308,8 @@ class Config:
                   if raw.get("cost") else None),
             model=(AdapterConfig.parse(raw["model"], where="model")
                    if raw.get("model") else None),
-            notify=[AdapterConfig.parse(c, where=f"notify[{i}]")
-                    for i, c in enumerate(notify_raw)],
-            dispatch=_parse_dispatch(raw.get("dispatch") or {}),
+            notify=notify,
+            dispatch=_parse_dispatch(raw.get("dispatch") or {}, routes=routes),
             detectors=_parse_detectors(raw.get("detectors") or {}),
             alerts=_parse_alerts(raw.get("alerts") or {}),
             storage=StorageConfig(path=str((raw.get("storage") or {}).get("path", "") or "")),
@@ -319,6 +360,17 @@ class Config:
                     f"son la llave del ruteo por severidad; repetidos, uno gana en "
                     f"silencio y el otro nunca entrega.")
             vistos.add(canal.name)
+        if self.notify and self.dispatch.routes:
+            # Una severidad que ningún canal acepta se descarta en silencio
+            # (`unrouted`). Casi siempre es un typo, no una decisión: si de
+            # verdad no querés verla, un canal `log` la recibe gratis.
+            huerfanas = [str(sev) for sev in (Severity.CRITICAL, Severity.WARNING, Severity.INFO)
+                         if not any(self.dispatch.accepts(c.name, sev) for c in self.notify)]
+            if huerfanas:
+                out.append(
+                    f"notify: ninguna de las `severities` cubre {', '.join(huerfanas)}. "
+                    f"Lo que salga con esa severidad se descartaría. Agregala a "
+                    f"algún canal o dejá uno sin `severities` (recibe todo).")
 
         if not self.server.api_token and not self.server.allow_insecure:
             out.append(

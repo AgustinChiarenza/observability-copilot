@@ -2,6 +2,7 @@
 del despachante. Y lo que pasa cuando el disco no colabora."""
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -118,8 +119,8 @@ def test_el_log_de_alertas_guarda_al_terminar_y_recarga_entero(tmp_path):
 # --- Despachante -----------------------------------------------------------------
 
 
-def _msg(fp: str) -> Message:
-    return Message(title="t", body="b", severity=Severity.WARNING, fingerprint=fp)
+def _msg(fp: str, sev: Severity = Severity.WARNING) -> Message:
+    return Message(title="t", body="b", severity=sev, fingerprint=fp)
 
 
 async def test_el_dedup_y_el_tope_sobreviven_al_reinicio(tmp_path):
@@ -179,3 +180,29 @@ def test_build_sin_storage_queda_en_memoria_y_lo_dice(caplog):
     assert not rt.storage.durable and not rt.alert_log.durable
     assert audit.summary()["durable"] is False
     assert "storage.path no configurado" in caplog.text
+
+
+async def test_la_resuelta_sigue_al_disparo_a_traves_del_reinicio(tmp_path):
+    ruta = {"sms": frozenset({Severity.CRITICAL}), "chat": frozenset({Severity.WARNING})}
+    d = Dispatcher([LogNotifier(name="sms"), LogNotifier(name="chat")],
+                   Policy(routes=ruta), state=State(tmp_path / "dispatch.json"))
+    await d.send(_msg("w", Severity.WARNING))
+
+    sms, chat = LogNotifier(name="sms"), LogNotifier(name="chat")
+    d2 = Dispatcher([sms, chat], Policy(routes=ruta), state=State(tmp_path / "dispatch.json"))
+    out = await d2.send(_msg("w", Severity.RESOLVED))
+    assert out.sent and [x.channel for x in out.deliveries] == ["chat"]
+    assert sms.sent == []
+
+
+async def test_el_estado_de_antes_de_f2_sigue_valiendo(tmp_path):
+    """Antes se guardaba sólo la fecha por fingerprint. Ese archivo tiene que
+    cargar, y la resuelta de un disparo así va a todos los canales: no se sabe
+    por dónde salió."""
+    p = tmp_path / "dispatch.json"
+    p.write_text(json.dumps({"last_sent": {"f": datetime.now(UTC).isoformat()}}))
+    a, b = LogNotifier(name="a"), LogNotifier(name="b")
+    d = Dispatcher([a, b], state=State(p))
+    assert d.decide(_msg("f")) == "deduped"
+    out = await d.send(_msg("f", Severity.RESOLVED))
+    assert [x.channel for x in out.deliveries] == ["a", "b"]

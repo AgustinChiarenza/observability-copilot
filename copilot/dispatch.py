@@ -15,14 +15,23 @@ Todo lo que es *política* vive acá, una sola vez para todos los canales:
               el error que te desinstala.
   recorte     al `max_chars` que declara cada canal. Un SMS no puede con 3.000
               caracteres y no tiene por qué saberlo el que redacta.
+  ruteo       cada canal declara qué severidades recibe (`severities` en el
+              YAML; sin la clave recibe todo). Lo crítico va al SMS de guardia,
+              lo informativo al canal de Slack que nadie mira de noche. Un
+              mensaje que ningún canal acepta termina en `unrouted`, que es
+              distinto de `no_channels`: hay canales, pero la config no lo
+              manda a ninguno.
 
 Un `RESOLVED` no se deduplica contra el disparo que cierra: es la otra mitad de
-la misma conversación y tiene que llegar. Y borra la marca del disparo, así el
-próximo se avisa aunque venga antes del `repeat_interval`.
+la misma conversación y tiene que llegar. Va **exactamente a los canales que
+recibieron el disparo** —no a los que hoy aceptarían esa severidad— porque el
+que vio "[CRITICAL] disco lleno" es el que necesita ver "[RESUELTA]". Y borra
+la marca del disparo, así el próximo se avisa aunque venga antes del
+`repeat_interval`.
 
-El estado es en memoria. Un reinicio olvida los dedups —lo peor que pasa es un
-aviso repetido— y los topes del día, que es el caso a mirar cuando llegue la
-persistencia (F7).
+Con `state` el despachante recuerda entre reinicios a quién le avisó qué y
+cuántas veces hoy. Sin él, lo peor que pasa es un aviso repetido y un tope que
+arranca de cero.
 """
 from __future__ import annotations
 
@@ -67,12 +76,39 @@ class Policy:
     repeat_interval: timedelta = timedelta(hours=4)
     quiet_hours: QuietHours | None = None
     daily_cap: int = 50
+    #: Por nombre de canal, qué severidades recibe. Un canal que no figura
+    #: recibe todas. `RESOLVED` no se lista: sigue al disparo.
+    routes: dict[str, frozenset[Severity]] = field(default_factory=dict)
+
+    def accepts(self, channel: str, severity: Severity) -> bool:
+        permitidas = self.routes.get(channel)
+        return permitidas is None or severity in permitidas
+
+
+@dataclass(frozen=True)
+class Sent:
+    """Lo que se recuerda de un disparo: cuándo salió y por dónde. Lo segundo
+    es para que la resuelta vaya a los mismos canales."""
+
+    at: datetime
+    channels: tuple[str, ...] = ()
+
+    @classmethod
+    def from_state(cls, raw: Any) -> Sent:
+        # Antes de F2 se guardaba sólo la fecha. Ese estado sigue siendo
+        # válido: una resuelta de un disparo viejo va a todos los canales.
+        if isinstance(raw, str):
+            return cls(datetime.fromisoformat(raw))
+        return cls(datetime.fromisoformat(raw["at"]), tuple(raw.get("channels") or ()))
+
+    def as_state(self) -> dict[str, Any]:
+        return {"at": self.at.isoformat(), "channels": list(self.channels)}
 
 
 @dataclass
 class Outcome:
     """Qué pasó con un mensaje. `decision` es una de:
-    sent | deduped | quiet | capped | no_channels | unpaired."""
+    sent | deduped | quiet | capped | no_channels | unrouted | unpaired."""
 
     fingerprint: str
     title: str
@@ -108,7 +144,7 @@ class Dispatcher:
                  state: State | None = None):
         self.channels = list(channels)
         self.policy = policy or Policy()
-        self._last_sent: dict[str, datetime] = {}
+        self._last_sent: dict[str, Sent] = {}
         self._sent_today: dict[tuple[str, date], int] = {}
         self._cap_notified: set[tuple[str, date]] = set()
         self.history: deque[Outcome] = deque(maxlen=500)
@@ -122,13 +158,13 @@ class Dispatcher:
 
     def _restore(self, d: dict[str, Any]) -> None:
         try:
-            self._last_sent = {str(k): datetime.fromisoformat(v)
+            self._last_sent = {str(k): Sent.from_state(v)
                                for k, v in (d.get("last_sent") or {}).items()}
             self._sent_today = {(str(c), date.fromisoformat(f)): int(n)
                                 for c, f, n in (d.get("sent_today") or [])}
             self._cap_notified = {(str(c), date.fromisoformat(f))
                                   for c, f in (d.get("cap_notified") or [])}
-        except (ValueError, TypeError) as e:
+        except (ValueError, TypeError, KeyError) as e:
             logger.warning("dispatch: estado ilegible, se arranca vacío (%s)", e)
             self._last_sent, self._sent_today, self._cap_notified = {}, {}, set()
 
@@ -141,14 +177,26 @@ class Dispatcher:
         self._sent_today = {k: v for k, v in self._sent_today.items() if k[1] == hoy}
         self._cap_notified = {k for k in self._cap_notified if k[1] == hoy}
         self._last_sent = {k: v for k, v in self._last_sent.items()
-                           if now - v < _REMEMBER_SENT}
+                           if now - v.at < _REMEMBER_SENT}
         self._state.save({
-            "last_sent": {k: v.isoformat() for k, v in self._last_sent.items()},
+            "last_sent": {k: v.as_state() for k, v in self._last_sent.items()},
             "sent_today": [[c, f.isoformat(), n] for (c, f), n in self._sent_today.items()],
             "cap_notified": [[c, f.isoformat()] for c, f in self._cap_notified],
         })
 
     # --- política -----------------------------------------------------------
+
+    def targets(self, m: Message) -> list[NotifyPort]:
+        """Por qué canales saldría este mensaje. Una resuelta va por donde fue
+        el disparo; el resto, por los canales que aceptan su severidad."""
+        if m.severity is Severity.RESOLVED:
+            previo = self._last_sent.get(m.fingerprint)
+            if previo is None:
+                return []
+            if not previo.channels:      # estado de antes de F2: no se sabe
+                return list(self.channels)
+            return [c for c in self.channels if c.name in previo.channels]
+        return [c for c in self.channels if self.policy.accepts(c.name, m.severity)]
 
     def decide(self, m: Message, *, now: datetime | None = None) -> str:
         now = now or datetime.now(UTC)
@@ -160,10 +208,12 @@ class Dispatcher:
             # 3 AM es un SMS por algo que nadie supo que pasaba — y rompe la
             # promesa de las quiet hours por la puerta de atrás.
             return "sent" if m.fingerprint in self._last_sent else "unpaired"
+        if not self.targets(m):
+            return "unrouted"
         if m.fingerprint:
             previo = self._last_sent.get(m.fingerprint)
             espera = m.repeat_after or self.policy.repeat_interval
-            if previo and now - previo < espera:
+            if previo and now - previo.at < espera:
                 return "deduped"
         qh = self.policy.quiet_hours
         if qh and m.severity is not Severity.CRITICAL and qh.covers(now):
@@ -172,14 +222,18 @@ class Dispatcher:
 
     async def send(self, m: Message, *, force: bool = False,
                    now: datetime | None = None) -> Outcome:
-        """`force` saltea dedup, quiet hours y tope. Es para el mensaje de prueba
-        de la instalación —"¿llega?"— y no para nada que corra solo."""
+        """`force` saltea dedup, quiet hours, tope y ruteo: sale por todos los
+        canales. Es para el mensaje de prueba de la instalación —"¿llega?"— y
+        no para nada que corra solo."""
         now = now or datetime.now(UTC)
-        decision = "sent" if force and self.channels else self.decide(m, now=now)
+        if force and self.channels:
+            decision, canales = "sent", list(self.channels)
+        else:
+            decision, canales = self.decide(m, now=now), self.targets(m)
         out = Outcome(m.fingerprint, m.title, str(m.severity), decision, at=now.isoformat())
 
         if decision == "sent":
-            for canal in self.channels:
+            for canal in canales:
                 d = await self._deliver(canal, m, now, force=force)
                 if d is not None:
                     out.deliveries.append(d)
@@ -189,7 +243,11 @@ class Dispatcher:
                 if m.severity is Severity.RESOLVED:
                     self._last_sent.pop(m.fingerprint, None)
                 else:
-                    self._last_sent[m.fingerprint] = now
+                    # Se recuerdan los que recibieron el disparo (aunque la
+                    # entrega haya fallado), no los que quedaron en el tope:
+                    # a esos la resuelta les hablaría de algo que no vieron.
+                    self._last_sent[m.fingerprint] = Sent(
+                        now, tuple(d.channel for d in out.deliveries))
             self._snapshot(now)   # también si quedó "capped": cambió el contador
 
         telemetry.NOTIFY_OUTCOMES.labels(decision=out.decision).inc()
@@ -245,6 +303,9 @@ class Dispatcher:
                      "tz": self.policy.quiet_hours.tz}
                     if self.policy.quiet_hours else None),
                 "daily_cap": self.policy.daily_cap,
+                "routes": {c.name: (sorted(self.policy.routes[c.name])
+                                    if c.name in self.policy.routes else "all")
+                           for c in self.channels},
             },
             "sent_today": {c.name: self._sent_today.get((c.name, hoy), 0)
                            for c in self.channels},

@@ -93,6 +93,10 @@ model:
 # diario NO viven en el canal: van en `dispatch`, iguales para todos, porque lo
 # que te desinstala no es un bug del adapter de Slack, es mandar 200 SMS una
 # madrugada. Slack con bloques, Teams y mail son de F3.
+#
+# `severities` dice qué recibe cada canal: [critical, warning, info]. Sin la
+# clave recibe todo. `resolved` no se lista: la resuelta va a los canales que
+# recibieron el disparo. Toda severidad tiene que tener al menos un canal.
 notify:
   - name: ops
     adapter: log
@@ -100,6 +104,7 @@ notify:
   #   adapter: webhook
   #   url: ${SLACK_WEBHOOK_URL}
   #   template: slack
+  #   severities: [critical, warning]
   # SMN de Huawei: un topic, y atrás lo que el cliente haya suscripto (SMS,
   # mail, HTTP). Necesita `pip install observability-copilot[huawei]` o la imagen
   # construida con --build-arg EXTRAS=huawei.
@@ -110,6 +115,7 @@ notify:
   #   ak: ${HW_AK}
   #   sk: ${HW_SK}
   #   max_chars: 400        # un SMS recorta a ~490 bytes; con sólo mail, subilo
+  #   severities: [critical]  # el SMS de guardia no es para avisos informativos
 
 # La política de entrega. Una para todos los canales.
 dispatch:

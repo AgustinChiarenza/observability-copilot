@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 
 from copilot.config import Config, ConfigError, expand, parse_duration
+from copilot.ports.notify import Severity
 
 
 def test_los_secretos_salen_del_entorno(monkeypatch):
@@ -82,3 +83,44 @@ def test_un_adapter_sin_nombre_lo_dice():
     with pytest.raises(ConfigError) as e:
         Config.from_dict({"metrics": {"url": "http://x"}})
     assert "metrics.adapter" in str(e.value)
+
+
+# --- Ruteo por severidad (F2) -----------------------------------------------
+
+_BASE = {
+    "server": {"api_token": "t"},
+    "metrics": {"adapter": "prometheus", "url": "http://x"},
+    "model": {"adapter": "openai_compat", "base_url": "http://y", "model": "m"},
+}
+
+
+def test_severities_sale_del_canal_y_entra_a_la_politica():
+    cfg = Config.from_dict({**_BASE, "notify": [
+        {"name": "guardia", "adapter": "log", "severities": ["critical"]},
+        {"name": "chat", "adapter": "log", "severities": "warning"},
+        {"name": "todo", "adapter": "log"},
+    ]})
+    assert cfg.dispatch.routes == {
+        "guardia": frozenset({Severity.CRITICAL}), "chat": frozenset({Severity.WARNING})}
+    # El adapter no la ve: no es una opción suya.
+    assert all("severities" not in c.options for c in cfg.notify)
+    assert cfg.problems() == []
+
+
+@pytest.mark.parametrize("malo, pista", [
+    (["urgente"], "no es una severidad"),
+    (["resolved"], "no se lista"),
+    ([], "lista no vacía"),
+])
+def test_severities_invalidas_nombran_el_campo(malo, pista):
+    with pytest.raises(ConfigError, match=r"notify\[0\]\.severities") as e:
+        Config.from_dict({**_BASE, "notify": [
+            {"name": "x", "adapter": "log", "severities": malo}]})
+    assert pista in str(e.value)
+
+
+def test_una_severidad_que_nadie_recibe_es_un_problema_de_arranque():
+    cfg = Config.from_dict({**_BASE, "notify": [
+        {"name": "guardia", "adapter": "log", "severities": ["critical"]}]})
+    problemas = cfg.problems()
+    assert len(problemas) == 1 and "warning, info" in problemas[0]

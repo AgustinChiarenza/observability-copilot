@@ -126,3 +126,78 @@ async def test_un_canal_que_explota_no_frena_a_los_demas(canal):
 async def test_sin_canales_lo_dice():
     out = await Dispatcher([]).send(msg(), now=T0)
     assert out.decision == "no_channels"
+
+
+# --- Ruteo por severidad (F2) -----------------------------------------------
+
+
+def _ruteado() -> tuple[Dispatcher, LogNotifier, LogNotifier, LogNotifier]:
+    guardia = LogNotifier(name="guardia")
+    slack = LogNotifier(name="slack")
+    log = LogNotifier(name="log")
+    d = Dispatcher([guardia, slack, log], Policy(routes={
+        "guardia": frozenset({Severity.CRITICAL}),
+        "slack": frozenset({Severity.CRITICAL, Severity.WARNING}),
+    }))
+    return d, guardia, slack, log
+
+
+async def test_cada_canal_recibe_solo_las_severidades_que_declara():
+    d, guardia, slack, log = _ruteado()
+    out = await d.send(msg("c", Severity.CRITICAL), now=T0)
+    assert [x.channel for x in out.deliveries] == ["guardia", "slack", "log"]
+    out = await d.send(msg("w", Severity.WARNING), now=T0)
+    assert [x.channel for x in out.deliveries] == ["slack", "log"]
+    out = await d.send(msg("i", Severity.INFO), now=T0)
+    assert [x.channel for x in out.deliveries] == ["log"]
+    assert len(guardia.sent) == 1 and len(slack.sent) == 2 and len(log.sent) == 3
+
+
+async def test_lo_que_ningun_canal_acepta_queda_unrouted_y_no_deduplica():
+    guardia = LogNotifier(name="guardia")
+    d = Dispatcher([guardia], Policy(routes={"guardia": frozenset({Severity.CRITICAL})}))
+    out = await d.send(msg("i", Severity.INFO), now=T0)
+    assert out.decision == "unrouted" and out.deliveries == []
+    assert guardia.sent == []
+    # No quedó marcado como enviado: si mañana se rutea, sale.
+    assert d.decide(msg("i", Severity.INFO), now=T0) == "unrouted"
+    d.policy = Policy()
+    assert d.decide(msg("i", Severity.INFO), now=T0) == "sent"
+
+
+async def test_la_resuelta_va_por_donde_fue_el_disparo_no_por_su_severidad():
+    """Una resuelta es severidad `resolved`, que ningún canal lista. Tiene que
+    llegarle a quien vio el disparo, y sólo a ese."""
+    d, guardia, _, _ = _ruteado()
+    await d.send(msg("w", Severity.WARNING), now=T0)
+    out = await d.send(msg("w", Severity.RESOLVED), now=T0 + timedelta(minutes=5))
+    assert out.sent
+    assert [x.channel for x in out.deliveries] == ["slack", "log"]
+    assert guardia.sent == []
+
+
+async def test_la_resuelta_no_le_llega_al_canal_que_estaba_en_el_tope():
+    """Se recuerdan los canales que recibieron el disparo, no los que lo
+    aceptaban: al que quedó en el tope, la resuelta le hablaría de algo que
+    nunca vio."""
+    a, b = LogNotifier(name="a"), LogNotifier(name="b")
+    d = Dispatcher([a, b], Policy(daily_cap=2, routes={"a": frozenset({Severity.WARNING})}))
+    await d.send(msg("i1", Severity.INFO), now=T0)       # sólo b
+    await d.send(msg("i2", Severity.INFO), now=T0)       # b llega al tope
+    out = await d.send(msg("x", Severity.WARNING), now=T0)
+    assert [x.channel for x in out.deliveries] == ["a"]  # b quedó capped
+    out = await d.send(msg("x", Severity.RESOLVED), now=T0)
+    assert out.sent and [x.channel for x in out.deliveries] == ["a"]
+    assert [m.fingerprint for m in b.sent] == ["i1", "i2", "cap:b"]
+
+
+async def test_force_saltea_el_ruteo_tambien():
+    d, *_ = _ruteado()
+    out = await d.send(msg("t", Severity.INFO), force=True, now=T0)
+    assert [x.channel for x in out.deliveries] == ["guardia", "slack", "log"]
+
+
+def test_el_resumen_muestra_el_ruteo():
+    d, *_ = _ruteado()
+    assert d.summary()["policy"]["routes"] == {
+        "guardia": ["critical"], "slack": ["critical", "warning"], "log": "all"}
