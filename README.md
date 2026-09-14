@@ -7,7 +7,7 @@ esté, y contesta preguntas sobre todo eso.
 No trae TSDB. No trae motor de reglas. No toca infraestructura.
 
 ```
-   El stack del cliente                    Este contenedor
+   El stack                                       Este contenedor
  ┌────────────────────────┐   PromQL    ┌──────────────────────────────┐
  │ Prometheus / Thanos /  │◀────────────│ MetricsPort                  │
  │ Mimir / VictoriaMetrics│             │                              │
