@@ -206,6 +206,8 @@ curl -X POST localhost:8080/v1/chat \
 
 La respuesta trae el texto y la traza de tools. Todo lo que se consultó queda
 en `GET /v1/audit`, persistido en el PVC.
+El contrato completo de la API (chat, receiver, vocabulario de decisiones,
+auditoría) está en [`integracion.md`](integracion.md).
 
 ## Operación
 

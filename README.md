@@ -50,7 +50,9 @@ son 60 líneas y se puede auditar de una sentada.
 
 Para el cluster de un cliente: [`docs/instalacion.md`](docs/instalacion.md)
 —chart de Helm, Secret, NetworkPolicy, el receiver de Alertmanager y qué
-verificar antes de irse—. Para probarlo en una máquina, el compose:
+verificar antes de irse—. Para el equipo que lo integra en su propio stack
+(contrato de `/v1/chat`, receiver de Alertmanager, auditoría):
+[`docs/integracion.md`](docs/integracion.md). Para probarlo en una máquina, el compose:
 
 ```bash
 cp config/copilot.example.yaml config/copilot.yaml
