@@ -137,6 +137,12 @@ kubectl -n copilot exec deploy/copilot-observability-copilot -- python -m copilo
 kubectl -n copilot exec deploy/copilot-observability-copilot -- python -m copilot notify-test
 ```
 
+Antes de instalar en el cluster del cliente, `scripts/verify-kind.sh` hace
+todo esto en un kind local con Calico: `helm install`, la NetworkPolicy
+cortando de verdad (desde `monitoring` llega, desde `default` no), el PVC
+sobreviviendo al pod, Alertmanager real contra el receiver y el chat con el
+modelo. Tarda unos minutos y borra el cluster al final.
+
 Desde afuera del cluster, con el `.env` completo y `config/copilot.yaml`
 apuntando a las credenciales reales, `scripts/verify-real.sh` corre lo mismo y
 además cada tool de lectura y el detector en seco; con `--notify` manda el

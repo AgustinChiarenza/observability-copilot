@@ -257,6 +257,8 @@ deploy/
 scripts/
   verify-f0.sh  el criterio de salida contra contenedores reales.
   verify-helm.sh el chart sin cluster: lint, esquemas, y que la config rendida cargue.
+  verify-kind.sh el chart en un kind con Calico: NetworkPolicy, PVC, Alertmanager, chat.
+  verify-real.sh cada puerto con credenciales reales, sin imprimirlas.
   sbom.sh       SBOM CycloneDX de la imagen y escaneo de CVEs.
 ```
 
